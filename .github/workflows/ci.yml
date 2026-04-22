@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -e .[dev]
+
+      - name: Lint (Ruff)
+        run: ruff check .
+
+      - name: Format check
+        run: ruff format --check .
+
+      - name: SQL Lint
+        run: sqlfluff lint .
+
+      - name: Run tests
+        run: pytest
