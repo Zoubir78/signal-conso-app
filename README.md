@@ -47,7 +47,7 @@ pip install -e ".[dev]"
 cp -n .env.example .env
 ```
 
-### dbt (Silver / Gold)
+### dbt
 
 ```bash
 # Authenticate with GCP
