@@ -1,35 +1,47 @@
 name: CI
 
 on:
-  push:
-    branches: [ "main", "develop" ]
   pull_request:
+  push:
+    branches:
+      - main
+      - develop
 
 jobs:
-  build:
+  lint-and-test:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v6
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install Poetry
+        run: pipx install poetry==2.3.2
+
+      - name: Add pipx bin to PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Show versions
         run: |
-          pip install -e .[dev]
+          python --version
+          poetry --version
 
-      - name: Lint (Ruff)
-        run: ruff check .
+      - name: Check lock file
+        run: poetry check --lock
 
-      - name: Format check
-        run: ruff format --check .
+      - name: Install dependencies
+        run: poetry install --extras dev --no-root
 
-      - name: SQL Lint
-        run: sqlfluff lint .
+      - name: Run Ruff check
+        run: poetry run ruff check .
+
+      - name: Check Ruff formatting
+        run: poetry run ruff format --check .
 
       - name: Run tests
-        run: pytest
+        run: poetry run pytest -q
