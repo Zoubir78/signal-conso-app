@@ -1,14 +1,46 @@
-﻿
-version: 2
+﻿version: 2
 
 sources:
-  - name: raw
+  - name: Complaints
     database: tri-demandes-clients
-    schema: signalconso_raw
+    schema: Complaints
     tables:
-      - name: signalconso
-        description: "Table externe pointant sur gs://clean_complaints/raw/*.csv"
-        external:
-          location: gs://clean_complaints/raw/*.csv
-          file_format: csv
-          auto_detect: true
+      - name: Signal_Conso
+        description: "Table source des signalements SignalConso"
+        columns:
+          - name: id
+            description: "Identifiant unique du signalement"
+          - name: category
+            description: "Catégorie principale"
+          - name: subcategories
+            description: "Sous-catégories"
+          - name: creationdate
+            description: "Date de création (DATE)"
+          - name: contactagreement
+            description: "Accord de contact (0/1)"
+          - name: status
+            description: "Statut du signalement"
+          - name: forwardtoreponseconso
+            description: "Transmis à réponseconso (0/1)"
+          - name: tags
+            description: "Tags associés"
+          - name: signalement_transmis
+            description: "Signalement transmis (0/1)"
+          - name: signalement_lu
+            description: "Signalement lu (0/1)"
+          - name: signalement_reponse
+            description: "Signalement avec réponse (0/1)"
+          - name: dep_name
+            description: "Nom du département"
+          - name: dep_code
+            description: "Code du département"
+          - name: reg_code
+            description: "Code de la région"
+          - name: reg_name
+            description: "Nom de la région"
+          - name: clean_text
+            description: "Texte nettoyé et normalisé"
+          - name: token_count
+            description: "Nombre de tokens dans clean_text"
+          - name: is_valid
+            description: "True si le texte est valide (longueur >= 10)"

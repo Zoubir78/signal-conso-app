@@ -1,0 +1,11 @@
+-- created_at: 2026-04-23T11:24:51.585005500+00:00
+-- finished_at: 2026-04-23T11:24:53.718346100+00:00
+-- elapsed: 2.1s
+-- outcome: error
+-- error vendor code: -2147483648
+-- error message: Unknown: [BigQuery] Storage API is not available for query: https://console.cloud.google.com/bigquery?project=tri-demandes-clients&j=bq:EU:nb9lwKHpLhQtkvwslVmYVBLenkR&page=queryresults
+-- dialect: bigquery
+-- node_id: not available
+-- query_id: not available
+-- desc: not provided
+select 1 as id;
