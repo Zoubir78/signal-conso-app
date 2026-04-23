@@ -1,0 +1,22 @@
+signalconso:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: service-account
+      project: tri-demandes-clients
+      dataset: signalconso_dev
+      keyfile: ./secrets/tri-demandes-clients-da1709669c29.json
+      location: EU
+      timeout_seconds: 300
+      threads: 4
+
+    prod:
+      type: bigquery
+      method: service-account
+      project: tri-demandes-clients
+      dataset: signalconso_prod
+      keyfile: ./secrets/tri-demandes-clients-da1709669c29.json
+      location: EU
+      timeout_seconds: 300
+      threads: 8
