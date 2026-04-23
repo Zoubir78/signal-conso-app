@@ -120,4 +120,3 @@ Le fichier volumineux `complaints.csv` est chargé via un pipeline d’ingestion
 - tests automatisés
 - déploiement Docker
 - orchestration Prefect
-
