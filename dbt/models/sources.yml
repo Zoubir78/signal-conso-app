@@ -1,0 +1,14 @@
+﻿
+version: 2
+
+sources:
+  - name: raw
+    database: tri-demandes-clients
+    schema: signalconso_raw
+    tables:
+      - name: signalconso
+        description: "Table externe pointant sur gs://clean_complaints/raw/*.csv"
+        external:
+          location: gs://clean_complaints/raw/*.csv
+          file_format: csv
+          auto_detect: true
