@@ -74,6 +74,56 @@ def read_mart_table(
 
 # ── Écriture ─────────────────────────────────────────────────────────────────
 
+# Correspondance des types BigQuery → cast pandas à appliquer avant upload
+_BQ_TYPE_CASTERS = {
+    "STRING":    lambda s: s.apply(
+                     lambda v: __import__('json').dumps(v, ensure_ascii=False)
+                     if isinstance(v, (list, dict)) else (str(v) if pd.notna(v) else None)
+                 ),
+    "DATE":      lambda s: pd.to_datetime(s, errors="coerce").dt.date,
+    "TIMESTAMP": lambda s: pd.to_datetime(s, errors="coerce"),
+    "DATETIME":  lambda s: pd.to_datetime(s, errors="coerce"),
+    "INTEGER":   lambda s: pd.to_numeric(s, errors="coerce").astype("Int64"),
+    "FLOAT":     lambda s: pd.to_numeric(s, errors="coerce"),
+    "BOOLEAN":   lambda s: s.map(
+                     lambda v: bool(v) if v not in (None, float("nan"), "") else None
+                 ),
+}
+
+
+def _align_to_bq_schema(
+    df: pd.DataFrame,
+    bq_schema: list,
+) -> pd.DataFrame:
+    """
+    Caste chaque colonne du DataFrame selon le type déclaré dans le schéma BigQuery.
+    Colonnes absentes du schéma : converties en string par sécurité.
+    Colonnes absentes du DataFrame : ignorées (BigQuery les remplira avec NULL).
+    """
+    import json
+
+    df = df.copy()
+    schema_map = {field.name: field.field_type for field in bq_schema}
+
+    for col in df.columns:
+        bq_type = schema_map.get(col)
+        if bq_type and bq_type in _BQ_TYPE_CASTERS:
+            try:
+                df[col] = _BQ_TYPE_CASTERS[bq_type](df[col])
+            except Exception as e:
+                print(f"  ⚠ Cast échoué pour '{col}' ({bq_type}) : {e} — conversion en string")
+                df[col] = df[col].astype(str).where(df[col].notna(), other=None)
+        elif df[col].dtype == object:
+            # Colonne hors schéma ou type inconnu : sérialise listes/dicts, str sinon
+            df[col] = df[col].apply(
+                lambda v: json.dumps(v, ensure_ascii=False)
+                if isinstance(v, (list, dict))
+                else (str(v) if pd.notna(v) else None)
+            )
+
+    return df
+
+
 def upload_dataframe_to_bigquery(
     df: pd.DataFrame,
     project_id: str = PROJECT_ID,
@@ -85,6 +135,12 @@ def upload_dataframe_to_bigquery(
     Charge un DataFrame dans la table source BigQuery.
     Par défaut cible Complaints.Signal_Conso.
 
+    Aligne automatiquement les types pandas sur le schéma BigQuery existant :
+    - Listes/dicts → JSON string (category, subcategories, tags)
+    - Dates string → DATE
+    - Entiers string → INTEGER
+    Évite toutes les erreurs PyArrow de conversion de type.
+
     Args:
         df: DataFrame à charger.
         project_id: ID du projet GCP.
@@ -92,16 +148,34 @@ def upload_dataframe_to_bigquery(
         table_id: Table cible (défaut : 'Signal_Conso').
         write_disposition: 'WRITE_APPEND' ou 'WRITE_TRUNCATE'.
     """
-    client = get_client(project_id)
-
-    df = df.copy()
-    df["_ingested_at"] = datetime.utcnow().isoformat()
-
+    client    = get_client(project_id)
     table_ref = f"{project_id}.{dataset_id}.{table_id}"
+
+    # Récupère le schéma de la table existante pour aligner les types
+    try:
+        bq_table = client.get_table(table_ref)
+        full_schema = bq_table.schema
+
+        # Aligne les types des colonnes présentes dans le DataFrame
+        df = _align_to_bq_schema(df, full_schema)
+        df["_ingested_at"] = datetime.utcnow().isoformat()
+
+        # Ne passe à BigQuery que les champs présents dans le DataFrame
+        # (clean_text, is_valid, token_count sont calculés par dbt — absents du raw)
+        df_cols = set(df.columns)
+        bq_schema = [f for f in full_schema if f.name in df_cols]
+        print(f"  Schéma filtré : {len(bq_schema)}/{len(full_schema)} champs")
+
+    except Exception:
+        # Table inexistante : autodetect suffit
+        print("  Table absente, autodetect activé")
+        df["_ingested_at"] = datetime.utcnow().isoformat()
+        bq_schema = None
 
     job_config = bigquery.LoadJobConfig(
         write_disposition=write_disposition,
-        autodetect=True,
+        schema=bq_schema if bq_schema else None,
+        autodetect=(bq_schema is None),
     )
 
     job = client.load_table_from_dataframe(df, table_ref, job_config=job_config)
