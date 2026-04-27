@@ -118,7 +118,7 @@ dmypy.json
 
 # dbt
 dbt/target/
-dbt/dbt_packages/dbt_utils/
+dbt/dbt_packages/
 dbt/logs/
 
 # VSCode project settings
@@ -135,7 +135,7 @@ secrets/*
 data/*
 
 # Models
-models/*
+models/*.joblib
 
 # pyproject.toml.bak - created by makefile
 pyproject.toml.bak
