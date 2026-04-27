@@ -1,0 +1,65 @@
+[project]
+name = "signal-conso-app"
+version = "0.1.0"
+description = "Plateforme intelligente de tri et de priorisation des demandes clients"
+requires-python = ">=3.11,<3.13"
+
+dependencies = [
+    "dbt-core",
+    "dbt-bigquery",
+    "fastapi[standard]==0.110.0",
+    "uvicorn[standard]==0.34.0",
+    "streamlit==1.28.0",
+    "pandas>=2.2",
+    "numpy>=1.24",
+    "scikit-learn==1.5.2",
+    "joblib==1.5.2",
+    "matplotlib==3.8.0",
+    "seaborn==0.12.2",
+    "wordcloud>=1.9",
+    "plotly==5.15.0",
+    "google-cloud-storage==2.16.0",
+    "requests==2.31.0",
+    "python-dotenv==1.2.2",
+    "sqlalchemy>=2.0",
+    "pydantic>=2.6",
+    "redis==5.0.4"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-mock>=3.15.1",
+    "ruff>=0.4.0"
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+norecursedirs = [".git", ".venv", "dist", "build"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+exclude = [
+    ".git",
+    "__pycache__",
+    ".venv",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
