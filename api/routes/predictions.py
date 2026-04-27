@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+# 1. Standard
 from datetime import datetime
 from uuid import uuid4
 
+# 2. Tierce partie
 from fastapi import APIRouter, HTTPException
 
+# 3. Local
 from api.schemas.prediction import PredictionRequest, PredictionResponse
 from src.app.core.config import get_settings
 from src.app.ml.predict import TicketModel, normalize_text
