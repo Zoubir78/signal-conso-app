@@ -136,6 +136,8 @@ data/*
 
 # Models
 models/*.joblib
+models/*.pkl
+models/*.pickle
 
 # pyproject.toml.bak - created by makefile
 pyproject.toml.bak
