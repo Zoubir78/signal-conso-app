@@ -3,6 +3,8 @@ repos:
     rev: v0.15.11
     hooks:
       - id: ruff
+        args: [ --fix ]
+      - id: ruff-format
 
   - repo: https://github.com/sqlfluff/sqlfluff
     rev: 4.1.0
