@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+
 from dotenv import load_dotenv
 
 # charge .env automatiquement
@@ -16,9 +17,7 @@ class Settings:
 
     GCP_PROJECT_ID: str | None = os.getenv("GCP_PROJECT_ID")
     GCS_BUCKET_NAME: str | None = os.getenv("GCS_BUCKET_NAME")
-    GOOGLE_APPLICATION_CREDENTIALS: str | None = os.getenv(
-        "GOOGLE_APPLICATION_CREDENTIALS"
-    )
+    GOOGLE_APPLICATION_CREDENTIALS: str | None = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 
     def validate(self):
         # valide seulement si vraiment nécessaire

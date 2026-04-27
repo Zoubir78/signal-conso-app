@@ -6,21 +6,23 @@ import pandas as pd
 from google.cloud import bigquery
 
 # ── Constantes projet ────────────────────────────────────────────────────────
-PROJECT_ID      = "tri-demandes-clients"
-SOURCE_DATASET  = "Complaints"
-SOURCE_TABLE    = "Signal_Conso"
-MART_DATASET    = "signalconso_dev_marts"   # signalconso_prod_marts en prod
-MART_TABLE      = "mart_signalconso"
-GCS_BUCKET      = "clean_complaints"
+PROJECT_ID = "tri-demandes-clients"
+SOURCE_DATASET = "Complaints"
+SOURCE_TABLE = "Signal_Conso"
+MART_DATASET = "signalconso_dev_marts"  # signalconso_prod_marts en prod
+MART_TABLE = "mart_signalconso"
+GCS_BUCKET = "clean_complaints"
 
 
 # ── Client ───────────────────────────────────────────────────────────────────
+
 
 def get_client(project_id: str = PROJECT_ID) -> bigquery.Client:
     return bigquery.Client(project=project_id)
 
 
 # ── Lecture ──────────────────────────────────────────────────────────────────
+
 
 def read_source_table(
     limit: int | None = None,
@@ -76,18 +78,19 @@ def read_mart_table(
 
 # Correspondance des types BigQuery → cast pandas à appliquer avant upload
 _BQ_TYPE_CASTERS = {
-    "STRING":    lambda s: s.apply(
-                     lambda v: __import__('json').dumps(v, ensure_ascii=False)
-                     if isinstance(v, (list, dict)) else (str(v) if pd.notna(v) else None)
-                 ),
-    "DATE":      lambda s: pd.to_datetime(s, errors="coerce").dt.date,
+    "STRING": lambda s: s.apply(
+        lambda v: (
+            __import__("json").dumps(v, ensure_ascii=False)
+            if isinstance(v, (list, dict))
+            else (str(v) if pd.notna(v) else None)
+        )
+    ),
+    "DATE": lambda s: pd.to_datetime(s, errors="coerce").dt.date,
     "TIMESTAMP": lambda s: pd.to_datetime(s, errors="coerce"),
-    "DATETIME":  lambda s: pd.to_datetime(s, errors="coerce"),
-    "INTEGER":   lambda s: pd.to_numeric(s, errors="coerce").astype("Int64"),
-    "FLOAT":     lambda s: pd.to_numeric(s, errors="coerce"),
-    "BOOLEAN":   lambda s: s.map(
-                     lambda v: bool(v) if v not in (None, float("nan"), "") else None
-                 ),
+    "DATETIME": lambda s: pd.to_datetime(s, errors="coerce"),
+    "INTEGER": lambda s: pd.to_numeric(s, errors="coerce").astype("Int64"),
+    "FLOAT": lambda s: pd.to_numeric(s, errors="coerce"),
+    "BOOLEAN": lambda s: s.map(lambda v: bool(v) if v not in (None, float("nan"), "") else None),
 }
 
 
@@ -116,9 +119,11 @@ def _align_to_bq_schema(
         elif df[col].dtype == object:
             # Colonne hors schéma ou type inconnu : sérialise listes/dicts, str sinon
             df[col] = df[col].apply(
-                lambda v: json.dumps(v, ensure_ascii=False)
-                if isinstance(v, (list, dict))
-                else (str(v) if pd.notna(v) else None)
+                lambda v: (
+                    json.dumps(v, ensure_ascii=False)
+                    if isinstance(v, (list, dict))
+                    else (str(v) if pd.notna(v) else None)
+                )
             )
 
     return df
@@ -148,7 +153,7 @@ def upload_dataframe_to_bigquery(
         table_id: Table cible (défaut : 'Signal_Conso').
         write_disposition: 'WRITE_APPEND' ou 'WRITE_TRUNCATE'.
     """
-    client    = get_client(project_id)
+    client = get_client(project_id)
     table_ref = f"{project_id}.{dataset_id}.{table_id}"
 
     # Récupère le schéma de la table existante pour aligner les types
@@ -184,6 +189,7 @@ def upload_dataframe_to_bigquery(
 
 
 # ── Export GCS ───────────────────────────────────────────────────────────────
+
 
 def export_mart_to_gcs(
     project_id: str = PROJECT_ID,
@@ -229,6 +235,7 @@ def export_mart_to_gcs(
 
 
 # ── Alias conservé pour rétrocompatibilité ───────────────────────────────────
+
 
 def export_table_to_gcs(
     project_id: str,

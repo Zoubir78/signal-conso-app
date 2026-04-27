@@ -12,9 +12,7 @@ import pandas as pd
 @dataclass(frozen=True)
 class CleaningConfig:
     min_text_length: int = 10
-    include_category_in_text: bool = (
-        False  # laisser False pour éviter la fuite de cible
-    )
+    include_category_in_text: bool = False  # laisser False pour éviter la fuite de cible
 
 
 COLUMN_ALIASES = {
@@ -130,10 +128,7 @@ def _parse_multivalue(value: Any) -> list[str]:
         if raw.startswith("[") or raw.startswith("(") or raw.startswith("{"):
             try:
                 parsed = ast.literal_eval(raw)
-                if isinstance(parsed, (list, tuple, set)):
-                    items = list(parsed)
-                else:
-                    items = [parsed]
+                items = list(parsed) if isinstance(parsed, (list, tuple, set)) else [parsed]
             except (ValueError, SyntaxError):
                 items = [part.strip() for part in raw.strip("[](){}").split(",")]
         else:
@@ -169,9 +164,7 @@ def build_clean_text(row: pd.Series, config: CleaningConfig | None = None) -> st
     dep_name = normalize_text(_get_first_value(row, COLUMN_ALIASES["dep_name"]))
     reg_name = normalize_text(_get_first_value(row, COLUMN_ALIASES["reg_name"]))
     status = normalize_text(_get_first_value(row, COLUMN_ALIASES["status"]))
-    complaint_text = normalize_text(
-        _get_first_value(row, COLUMN_ALIASES["complaint_text"])
-    )
+    complaint_text = normalize_text(_get_first_value(row, COLUMN_ALIASES["complaint_text"]))
 
     for value in [dep_name, reg_name, status, complaint_text]:
         if value:
@@ -188,9 +181,7 @@ def build_clean_text(row: pd.Series, config: CleaningConfig | None = None) -> st
     return normalize_text(" ".join(unique_parts))
 
 
-def transform_dataframe(
-    df: pd.DataFrame, config: CleaningConfig | None = None
-) -> pd.DataFrame:
+def transform_dataframe(df: pd.DataFrame, config: CleaningConfig | None = None) -> pd.DataFrame:
     config = config or CleaningConfig()
     out = df.copy()
 

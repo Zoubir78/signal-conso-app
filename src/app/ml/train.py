@@ -5,23 +5,21 @@ from typing import Any
 
 import joblib
 import pandas as pd
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression, SGDClassifier
-from sklearn.metrics import accuracy_score, f1_score, classification_report
+from sklearn.metrics import accuracy_score, classification_report, f1_score
 from sklearn.model_selection import train_test_split
 from sklearn.naive_bayes import ComplementNB
 from sklearn.pipeline import Pipeline
 from sklearn.svm import LinearSVC
-from sklearn.calibration import CalibratedClassifierCV
-
 
 # ── Catalogue des modèles disponibles ────────────────────────────────────────
 # Chaque entrée est un callable qui retourne un estimator sklearn non entraîné.
 # TfidfVectorizer est partagé et ajouté automatiquement dans build_pipeline().
 
 AVAILABLE_MODELS: dict[str, Any] = {
-
     "logreg": LogisticRegression(
         C=1.0,
         max_iter=1000,
@@ -30,16 +28,14 @@ AVAILABLE_MODELS: dict[str, Any] = {
         multi_class="auto",
         n_jobs=-1,
     ),
-
     "sgd": SGDClassifier(
-        loss="modified_huber",   # supporte predict_proba
+        loss="modified_huber",  # supporte predict_proba
         max_iter=200,
         tol=1e-3,
         class_weight="balanced",
         n_jobs=-1,
         random_state=42,
     ),
-
     "linearsvc": CalibratedClassifierCV(
         LinearSVC(
             C=0.5,
@@ -48,9 +44,7 @@ AVAILABLE_MODELS: dict[str, Any] = {
         ),
         cv=3,
     ),
-
     "complementnb": ComplementNB(alpha=0.1),
-
     "random_forest": RandomForestClassifier(
         n_estimators=300,
         max_depth=None,
@@ -86,14 +80,13 @@ def build_pipeline(model_name: str) -> Pipeline:
         ValueError: Si model_name est inconnu.
     """
     if model_name not in AVAILABLE_MODELS:
-        raise ValueError(
-            f"Modèle inconnu : '{model_name}'. "
-            f"Disponibles : {list(AVAILABLE_MODELS)}"
-        )
-    return Pipeline([
-        ("tfidf", _tfidf()),
-        ("clf",   AVAILABLE_MODELS[model_name]),
-    ])
+        raise ValueError(f"Modèle inconnu : '{model_name}'. Disponibles : {list(AVAILABLE_MODELS)}")
+    return Pipeline(
+        [
+            ("tfidf", _tfidf()),
+            ("clf", AVAILABLE_MODELS[model_name]),
+        ]
+    )
 
 
 def train_model(
@@ -164,26 +157,26 @@ def train_model(
     model.fit(X_train, y_train)
 
     # ── Évaluation ───────────────────────────────────────────────────────────
-    y_pred   = model.predict(X_test)
+    y_pred = model.predict(X_test)
     accuracy = accuracy_score(y_test, y_pred)
     f1_macro = f1_score(y_test, y_pred, average="macro", zero_division=0)
     f1_weighted = f1_score(y_test, y_pred, average="weighted", zero_division=0)
-    report   = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
+    report = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
 
     # ── Sérialisation ─────────────────────────────────────────────────────────
     Path(model_path).parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, model_path)
 
     return {
-        "model_name":   model_name,
-        "accuracy":     accuracy,
-        "f1_macro":     f1_macro,
-        "f1_weighted":  f1_weighted,
-        "n_classes":    len(valid_classes),
-        "n_train":      len(X_train),
-        "n_test":       len(X_test),
-        "report":       report,
-        "model_path":   model_path,
+        "model_name": model_name,
+        "accuracy": accuracy,
+        "f1_macro": f1_macro,
+        "f1_weighted": f1_weighted,
+        "n_classes": len(valid_classes),
+        "n_train": len(X_train),
+        "n_test": len(X_test),
+        "report": report,
+        "model_path": model_path,
     }
 
 
@@ -202,10 +195,10 @@ def predict(texts: list[str], model_path: str = "models/model.joblib") -> list[d
     Returns:
         [{"category": ..., "confidence": ...}, ...]
     """
-    model  = load_model(model_path)
-    preds  = model.predict(texts)
+    model = load_model(model_path)
+    preds = model.predict(texts)
     probas = model.predict_proba(texts).max(axis=1)
     return [
         {"category": cat, "confidence": round(float(prob), 4)}
-        for cat, prob in zip(preds, probas)
+        for cat, prob in zip(preds, probas, strict=False)
     ]
