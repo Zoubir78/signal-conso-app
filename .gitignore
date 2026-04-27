@@ -134,5 +134,8 @@ secrets/*
 # data files
 data/*
 
+# Models
+models/*
+
 # pyproject.toml.bak - created by makefile
 pyproject.toml.bak
