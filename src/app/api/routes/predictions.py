@@ -8,7 +8,7 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException
 
 # 3. Local
-from api.schemas.prediction import PredictionRequest, PredictionResponse
+from src.app.api.schemas.prediction import PredictionRequest, PredictionResponse
 from src.app.core.config import get_settings
 from src.app.ml.predict import TicketModel, normalize_text
 from src.app.services.gcs_service import find_prediction_in_bucket, upload_json_to_gcs
