@@ -6,16 +6,17 @@ signalconso:
       method: service-account
       project: tri-demandes-clients
       dataset: signalconso_dev
-      keyfile: C:\Users\Master\Desktop\signal-conso-app\secrets\tri-demandes-clients-da1709669c29.json
+      keyfile: "{{ env_var('GOOGLE_APPLICATION_CREDENTIALS') }}"
       location: europe-west9
       timeout_seconds: 300
       threads: 4
+
     prod:
       type: bigquery
       method: service-account
       project: tri-demandes-clients
       dataset: signalconso_prod
-      keyfile: C:\Users\Master\Desktop\signal-conso-app\secrets\tri-demandes-clients-da1709669c29.json
+      keyfile: "{{ env_var('GOOGLE_APPLICATION_CREDENTIALS') }}"
       location: europe-west9
       timeout_seconds: 300
       threads: 8
