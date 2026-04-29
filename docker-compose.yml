@@ -10,7 +10,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - API_URL=http://api:8000
+      - API_URL=http://api:8000/predictions
       - GCP_PROJECT_ID=tri-demandes-clients
       - GCS_BUCKET_NAME=clean_complaints
       - GOOGLE_APPLICATION_CREDENTIALS=/secrets/tri-demandes-clients-da1709669c29.json
@@ -24,7 +24,7 @@ services:
     ports:
       - "8501:8501"
     environment:
-      - API_URL=http://api:8000
+      - API_URL=http://api:8000/predictions
       - GCP_PROJECT_ID=tri-demandes-clients
       - GCS_BUCKET_NAME=clean_complaints
       - GOOGLE_APPLICATION_CREDENTIALS=/secrets/tri-demandes-clients-da1709669c29.json
