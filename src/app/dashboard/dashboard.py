@@ -23,7 +23,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-
 # ─────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────
@@ -523,7 +522,7 @@ with st.sidebar:
     st.markdown(f"**Bucket GCS** `{GCS_BUCKET_NAME}`")
     st.markdown(f"**Modèle par défaut** `{DEFAULT_MODEL_VER}`")
 
-    if st.button("🔄 Rafraîchir les artefacts", use_container_width=True):
+    if st.button("🔄 Rafraîchir les artefacts", width="stretch"):
         st.cache_data.clear()
         st.rerun()
 
@@ -573,11 +572,11 @@ with st.sidebar:
     st.markdown("#### ⚡ Raccourcis")
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("🏠 Home", use_container_width=True):
+        if st.button("🏠 Home", width="stretch"):
             st.session_state["active_tab_hint"] = "overview"
             st.rerun()
     with c2:
-        if st.button("📦 GCS", use_container_width=True):
+        if st.button("📦 GCS", width="stretch"):
             st.session_state["active_tab_hint"] = "gcs"
             st.rerun()
 
@@ -768,7 +767,7 @@ with tab_overview:
                     showlegend=False,
                 )
                 fig.update_traces(fillcolor="rgba(31,111,235,0.15)", line_width=2)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
 
             # ── Top catégories ────────────────────────
             col_a, col_b = st.columns(2)
@@ -795,7 +794,7 @@ with tab_overview:
                             height=340,
                             showlegend=False,
                         )
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width="stretch")
 
             with col_b:
                 st.markdown('<div class="sec-header">🔑 Mots-clés</div>', unsafe_allow_html=True)
@@ -817,7 +816,7 @@ with tab_overview:
                         height=340,
                         showlegend=False,
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
 
             # ── Aperçu données ────────────────────────
             st.markdown(
@@ -835,7 +834,7 @@ with tab_overview:
                 ]
                 if c in fdf.columns
             ]
-            st.dataframe(fdf[preview_cols].head(30), use_container_width=True, height=280)
+            st.dataframe(fdf[preview_cols].head(30), width="stretch", height=280)
 
 
 # ══════════════════════════════════════════════
@@ -886,7 +885,7 @@ with tab_map:
                     bordercolor="#21262d",
                 ),
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
             # Top 10 départements
             st.markdown(
@@ -942,7 +941,7 @@ with tab_predict:
         )
     with col_right:
         st.markdown("<br>", unsafe_allow_html=True)
-        run_pred = st.button("🚀 Classifier", use_container_width=True)
+        run_pred = st.button("🚀 Classifier", width="stretch")
         st.markdown("---")
         st.markdown(
             f"<div style='font-size:11px;color:#8b949e'>Modèle : `{Path(selected_model_blob).name}`</div>",
@@ -1046,7 +1045,7 @@ with tab_ml:
                 margin=dict(l=0, r=0, t=10, b=0),
                 height=300,
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
         # Benchmark sur le dataset courant
         st.divider()
@@ -1085,7 +1084,7 @@ with tab_ml:
                     prog.progress((idx + 1) / len(selected_models))
 
                 bench_df = pd.DataFrame(bench_results)
-                st.dataframe(bench_df, use_container_width=True)
+                st.dataframe(bench_df, width="stretch")
                 if "Accuracy" in bench_df.columns:
                     best = bench_df.sort_values("F1-macro", ascending=False).iloc[0]
                     st.success(
@@ -1125,7 +1124,7 @@ with tab_pipeline:
         unsafe_allow_html=True,
     )
 
-    if st.button("🚀 Lancer le pipeline", use_container_width=False):
+    if st.button("🚀 Lancer le pipeline", width="content"):
         log_lines: list[str] = []
         log_box = st.empty()
 
@@ -1210,7 +1209,7 @@ with tab_gcs:
         if blobs:
             blob_df = pd.DataFrame({"Fichier": blobs})
             blob_df["Extension"] = blob_df["Fichier"].apply(lambda x: Path(x).suffix or "–")
-            st.dataframe(blob_df, use_container_width=True, height=400)
+            st.dataframe(blob_df, width="stretch", height=400)
             st.caption(f"{len(blobs)} fichier(s) dans `{prefix}`")
         else:
             st.info(f"Aucun fichier dans `{prefix}`.")
