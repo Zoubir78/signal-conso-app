@@ -1,33 +1,61 @@
 version: "3.9"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Variables partagées entre les services
+# ─────────────────────────────────────────────────────────────────────────────
+x-gcp-env: &gcp-env
+  GCP_PROJECT_ID: tri-demandes-clients
+  GCS_BUCKET_NAME: clean_complaints
+  GOOGLE_APPLICATION_CREDENTIALS: /secrets/tri-demandes-clients-da1709669c29.json
+
+x-dbt-env: &dbt-env
+  DBT_PROFILES_DIR: /app/dbt   # profiles.yml est dans dbt/ du projet
+
+x-volumes: &common-volumes
+  - ./secrets/tri-demandes-clients-da1709669c29.json:/secrets/tri-demandes-clients-da1709669c29.json:ro
+  - ./dbt:/app/dbt:ro           # projet dbt + profiles.yml
+  - ./models:/app/models        # modèles joblib persistés entre runs
+  - ./data:/app/data            # CSV intermédiaires
+
 services:
 
+  # ── API FastAPI ─────────────────────────────────────────────────────────────
   api:
     build:
       context: .
       dockerfile: src/app/api/Dockerfile
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    image: signalconso-api:latest
     container_name: fastapi_api
+    restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
-      - API_URL=http://api:8000
-      - GCP_PROJECT_ID=tri-demandes-clients
-      - GCS_BUCKET_NAME=clean_complaints
-      - GOOGLE_APPLICATION_CREDENTIALS=/secrets/tri-demandes-clients-da1709669c29.json
-    volumes:
-      - ./secrets/tri-demandes-clients-da1709669c29.json:/secrets/tri-demandes-clients-da1709669c29.json:ro
+      <<: [*gcp-env, *dbt-env]
+      MODEL_PATH: /app/models/model.joblib
+      MODEL_VERSION: logreg-v1
+    volumes: *common-volumes
 
+  # ── Dashboard Streamlit ─────────────────────────────────────────────────────
   streamlit:
     build:
       context: .
+      dockerfile: Dockerfile
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    image: signalconso-dashboard:latest
     container_name: streamlit_app
+    restart: unless-stopped
     ports:
       - "8501:8501"
     environment:
-      - API_URL=http://api:8000
-      - GCP_PROJECT_ID=tri-demandes-clients
-      - GCS_BUCKET_NAME=clean_complaints
-      - GOOGLE_APPLICATION_CREDENTIALS=/secrets/tri-demandes-clients-da1709669c29.json
-    volumes:
-      - ./secrets/tri-demandes-clients-da1709669c29.json:/secrets/tri-demandes-clients-da1709669c29.json:ro
-
+      <<: [*gcp-env, *dbt-env]
+      API_URL: http://api:8000
+      PREDICTION_URL: http://api:8000/predictions/
+      MODEL_PATH: /app/models/model.joblib
+      MODEL_VERSION: logreg-v1
+    volumes: *common-volumes
+    depends_on:
+      api:
+        condition: service_healthy
