@@ -23,6 +23,36 @@ from google.cloud import storage
 
 from scripts.pipeline import run_pipeline
 
+# Prefect flows (optionnels : l'app garde un mode de secours si le module n'est pas importable)
+def _import_prefect_flows():
+    candidates = [
+        "src.app.flows.signal_conso_flows",
+        "flows.signal_conso_flows",
+        "signal_conso_flows",
+    ]
+    for module_name in candidates:
+        try:
+            module = __import__(
+                module_name,
+                fromlist=[
+                    "kpi_pipeline_flow",
+                    "flow_nombre_signalements",
+                    "flow_transmis_global",
+                    "flow_signalements_lus_reponse",
+                ],
+            )
+            return module
+        except Exception:
+            continue
+    return None
+
+
+_PREFECT_FLOWS = _import_prefect_flows()
+kpi_pipeline_flow = getattr(_PREFECT_FLOWS, "kpi_pipeline_flow", None) if _PREFECT_FLOWS else None
+flow_nombre_signalements = getattr(_PREFECT_FLOWS, "flow_nombre_signalements", None) if _PREFECT_FLOWS else None
+flow_transmis_global = getattr(_PREFECT_FLOWS, "flow_transmis_global", None) if _PREFECT_FLOWS else None
+flow_signalements_lus_reponse = getattr(_PREFECT_FLOWS, "flow_signalements_lus_reponse", None) if _PREFECT_FLOWS else None
+
 # ─────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────
@@ -359,7 +389,14 @@ def _bool_series(s: pd.Series) -> pd.Series:
 
 
 def _department_label(row: pd.Series) -> str:
-    code = _normalize_label(row.get("dep_code", "")) if not _is_missing(row.get("dep_code")) else ""
+    def _clean_dep_code(v: Any) -> str:
+        if _is_missing(v):
+            return ""
+        txt = str(v).strip().replace(".0", "")
+        txt = txt.zfill(2) if txt.isdigit() and len(txt) <= 2 else txt
+        return _normalize_label(txt)
+
+    code = _clean_dep_code(row.get("dep_code", ""))
     name = _normalize_label(row.get("dep_name", "")) if not _is_missing(row.get("dep_name")) else ""
     if code and name:
         return f"{code} – {name}"
@@ -452,6 +489,30 @@ def load_evaluation_report() -> dict | None:
 def download_model(blob_name: str, local: str = "/tmp/tmp_model.joblib") -> str:
     _gcs().bucket(GCS_BUCKET_NAME).blob(blob_name).download_to_filename(local)
     return local
+
+
+def _run_prefect_pipeline(
+    *,
+    bucket_name: str,
+    prefix: str,
+    reference_date: date | None,
+    period: str,
+    region: str | None,
+    department_label: str | None,
+) -> dict[str, Any]:
+    if kpi_pipeline_flow is None:
+        raise RuntimeError(
+            "Le module Prefect n'est pas disponible dans cet environnement."
+        )
+
+    return kpi_pipeline_flow(
+        bucket_name=bucket_name,
+        prefix=prefix,
+        reference_date=reference_date,
+        period=period,
+        region=region or None,
+        department_label=department_label or None,
+    )
 
 
 # ─────────────────────────────────────────────
@@ -566,6 +627,68 @@ with st.sidebar:
         st.warning("Aucun modèle .joblib trouvé dans `models/`.")
         st.session_state["selected_model_blob"] = DEFAULT_MODEL_PATH
         selected_model_blob = DEFAULT_MODEL_PATH
+
+    st.divider()
+
+    st.markdown("#### 🌀 Prefect")
+    st.caption("Déploiements définis dans `prefect.yaml` : pipeline complet, KPI nombre signalements, transmis global, lus + réponse, daily report.")
+    if kpi_pipeline_flow is None:
+        st.warning("Impossible d'importer les flows Prefect depuis l'application.")
+    else:
+        st.caption("Pilotez le pipeline Prefect directement depuis la sidebar.")
+
+        prefect_bucket = st.text_input(
+            "Bucket GCS",
+            value=GCS_BUCKET_NAME,
+            key="prefect_bucket_name",
+        )
+        prefect_prefix = st.text_input(
+            "Préfixe GCS",
+            value="processed/",
+            key="prefect_prefix_name",
+        )
+        prefect_period = st.selectbox(
+            "Période",
+            ["Depuis le début du mois", "7 derniers jours", "Toutes les données"],
+            index=0,
+            key="prefect_period_name",
+        )
+        prefect_ref_date = st.date_input(
+            "Date de référence",
+            value=date.today(),
+            format="DD/MM/YYYY",
+            key="prefect_ref_date_name",
+        )
+        prefect_region = st.text_input(
+            "Région (optionnel)",
+            value="",
+            placeholder="Île-de-France",
+            key="prefect_region_name",
+        )
+        prefect_department = st.text_input(
+            "Département (optionnel)",
+            value="",
+            placeholder="75 – Paris",
+            key="prefect_department_name",
+        )
+
+        if st.button("🚀 Lancer le flow Prefect", width="stretch"):
+            with st.spinner("Exécution du flow Prefect…"):
+                try:
+                    prefect_result = _run_prefect_pipeline(
+                        bucket_name=prefect_bucket.strip() or GCS_BUCKET_NAME,
+                        prefix=prefect_prefix.strip() or "processed/",
+                        reference_date=prefect_ref_date,
+                        period=prefect_period,
+                        region=prefect_region.strip() or None,
+                        department_label=prefect_department.strip() or None,
+                    )
+                    st.success("Flow Prefect terminé avec succès.")
+                    st.session_state["prefect_last_result"] = prefect_result
+                    with st.expander("Dernier résultat Prefect"):
+                        st.json(prefect_result)
+                except Exception as e:
+                    st.error(f"Erreur Prefect : {e}")
 
     st.divider()
 

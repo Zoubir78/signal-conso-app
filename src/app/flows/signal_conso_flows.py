@@ -154,6 +154,25 @@ def preprocess_task(df: pd.DataFrame) -> pd.DataFrame:
         if bool_col in df.columns:
             df[bool_col] = _bool_series(df[bool_col])
 
+    if "department_label" not in df.columns and ("dep_code" in df.columns or "dep_name" in df.columns):
+        def _dept_label(row: pd.Series) -> str:
+            parts: list[str] = []
+            if "dep_code" in row.index and not _is_missing(row.get("dep_code")):
+                code = str(row.get("dep_code")).strip().replace(".0", "")
+                if code.isdigit() and len(code) <= 2:
+                    code = code.zfill(2)
+                parts.append(code)
+            if "dep_name" in row.index and not _is_missing(row.get("dep_name")):
+                parts.append(str(row.get("dep_name")).strip())
+            if not parts:
+                return "Inconnu"
+            return " – ".join(parts)
+
+        df["department_label"] = df.apply(_dept_label, axis=1)
+        logger.info("Colonne 'department_label' créée pour harmoniser le filtrage département.")
+    elif "department_label" in df.columns:
+        df["department_label"] = df["department_label"].astype(str).str.strip()
+
     logger.info("Pre-traitement termine.")
     return df
 
