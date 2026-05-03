@@ -1,10 +1,6 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # requirements-flows.txt — Dépendances UNIQUEMENT pour les flows Prefect
 # ══════════════════════════════════════════════════════════════════════════════
-# Utilisé dans prefect.yaml > pull > pip_install_requirements
-# Ne contient QUE ce dont signal_conso_flows.py a besoin au runtime.
-# Evite les conflits avec fastapi/uvicorn/streamlit qui tournent ailleurs.
-# ══════════════════════════════════════════════════════════════════════════════
 
 # Orchestration — doit correspondre à la version du worker/serveur Prefect
 # Le worker tourne sur Prefect 3.x (task_engine.py présent, begin_task_map absent de engine.py)

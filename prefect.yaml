@@ -13,7 +13,7 @@ push: null
 pull:
   - prefect.deployments.steps.git_clone:
       id: git_clone
-      repository: https://github.com/Zoubir78/plateforme-tri-demandes-clients.git
+      repository: https://github.com/Zoubir78/signal-conso-app.git
       branch: main
 
   - prefect.deployments.steps.set_working_directory:
