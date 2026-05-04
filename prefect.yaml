@@ -1,0 +1,144 @@
+name: signal-conso
+
+build: null
+push: null
+
+pull:
+  - prefect.deployments.steps.git_clone:
+      id: git_clone
+      repository: https://github.com/Zoubir78/signal-conso-app.git
+      branch: main
+
+  - prefect.deployments.steps.set_working_directory:
+      directory: "{{ git_clone.directory }}"
+
+  - prefect.deployments.steps.pip_install_requirements:
+      requirements_file: requirements-flows.txt
+      stream_output: true
+
+deployments:
+  - name: signal-conso-pipeline
+    version: "1.0.0"
+    entrypoint: src/app/flows/signal_conso_flows.py:kpi_pipeline_flow
+
+    work_pool:
+      name: signal-conso-pool
+      work_queue_name: default
+      job_variables:
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: "/opt/prefect/secrets/tri-demandes-clients-da1709669c29.json"
+          GCS_BUCKET_NAME: "{{ prefect.variables.gcs_bucket_name }}"
+          GCS_PROCESSED_PREFIX: "{{ prefect.variables.gcs_processed_prefix }}"
+          GCS_RESULTS_PREFIX: "{{ prefect.variables.gcs_results_prefix }}"
+
+    schedule:
+      cron: "0 */4 * * *"
+      timezone: Europe/Paris
+      active: true
+
+    parameters:
+      bucket_name: "{{ prefect.variables.gcs_bucket_name }}"
+      prefix: "{{ prefect.variables.gcs_processed_prefix }}"
+      period: "Depuis le debut du mois"
+      region: null
+      department_label: null
+
+    concurrency_limit: 1
+
+  - name: kpi-nombre-signalements
+    version: "1.0.0"
+    entrypoint: src/app/flows/signal_conso_flows.py:flow_nombre_signalements
+
+    work_pool:
+      name: signal-conso-pool
+      work_queue_name: default
+      job_variables:
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: "/opt/prefect/secrets/tri-demandes-clients-da1709669c29.json"
+          GCS_BUCKET_NAME: "{{ prefect.variables.gcs_bucket_name }}"
+          GCS_PROCESSED_PREFIX: "{{ prefect.variables.gcs_processed_prefix }}"
+          GCS_RESULTS_PREFIX: "{{ prefect.variables.gcs_results_prefix }}"
+
+    schedule:
+      cron: "0 */4 * * *"
+      timezone: Europe/Paris
+      active: true
+
+    parameters: {}
+
+    concurrency_limit: 1
+
+  - name: kpi-transmis-global
+    version: "1.0.0"
+    entrypoint: src/app/flows/signal_conso_flows.py:flow_transmis_global
+
+    work_pool:
+      name: signal-conso-pool
+      work_queue_name: default
+      job_variables:
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: "/opt/prefect/secrets/tri-demandes-clients-da1709669c29.json"
+          GCS_BUCKET_NAME: "{{ prefect.variables.gcs_bucket_name }}"
+          GCS_PROCESSED_PREFIX: "{{ prefect.variables.gcs_processed_prefix }}"
+          GCS_RESULTS_PREFIX: "{{ prefect.variables.gcs_results_prefix }}"
+
+    schedule:
+      cron: "0 */4 * * *"
+      timezone: Europe/Paris
+      active: true
+
+    parameters:
+      kpi_type: both
+
+    concurrency_limit: 1
+
+  - name: kpi-signalements-lus-reponse
+    version: "1.0.0"
+    entrypoint: src/app/flows/signal_conso_flows.py:flow_signalements_lus_reponse
+
+    work_pool:
+      name: signal-conso-pool
+      work_queue_name: default
+      job_variables:
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: "/opt/prefect/secrets/tri-demandes-clients-da1709669c29.json"
+          GCS_BUCKET_NAME: "{{ prefect.variables.gcs_bucket_name }}"
+          GCS_PROCESSED_PREFIX: "{{ prefect.variables.gcs_processed_prefix }}"
+          GCS_RESULTS_PREFIX: "{{ prefect.variables.gcs_results_prefix }}"
+
+    schedule:
+      cron: "0 */4 * * *"
+      timezone: Europe/Paris
+      active: true
+
+    parameters: {}
+
+    concurrency_limit: 1
+
+  - name: signal-conso-daily-report
+    version: "1.0.0"
+    entrypoint: src/app/flows/signal_conso_flows.py:kpi_pipeline_flow
+
+    work_pool:
+      name: signal-conso-pool
+      work_queue_name: default
+      job_variables:
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: "/opt/prefect/secrets/tri-demandes-clients-da1709669c29.json"
+          GCS_BUCKET_NAME: "{{ prefect.variables.gcs_bucket_name }}"
+          GCS_PROCESSED_PREFIX: "{{ prefect.variables.gcs_processed_prefix }}"
+          GCS_RESULTS_PREFIX: "{{ prefect.variables.gcs_results_prefix }}"
+
+    schedule:
+      cron: "0 8 * * *"
+      timezone: Europe/Paris
+      active: true
+
+    parameters:
+      bucket_name: "{{ prefect.variables.gcs_bucket_name }}"
+      prefix: "{{ prefect.variables.gcs_processed_prefix }}"
+      period: "Depuis le debut du mois"
+      region: null
+      department_label: null
+
+    concurrency_limit: 1
