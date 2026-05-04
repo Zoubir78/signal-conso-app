@@ -26,7 +26,6 @@ deployments:
       work_queue_name: default
       job_variables:
         env:
-          GOOGLE_APPLICATION_CREDENTIALS: "/opt/prefect/secrets/tri-demandes-clients-da1709669c29.json"
           GCS_BUCKET_NAME: "{{ prefect.variables.gcs_bucket_name }}"
           GCS_PROCESSED_PREFIX: "{{ prefect.variables.gcs_processed_prefix }}"
           GCS_RESULTS_PREFIX: "{{ prefect.variables.gcs_results_prefix }}"
@@ -54,7 +53,6 @@ deployments:
       work_queue_name: default
       job_variables:
         env:
-          GOOGLE_APPLICATION_CREDENTIALS: "/opt/prefect/secrets/tri-demandes-clients-da1709669c29.json"
           GCS_BUCKET_NAME: "{{ prefect.variables.gcs_bucket_name }}"
           GCS_PROCESSED_PREFIX: "{{ prefect.variables.gcs_processed_prefix }}"
           GCS_RESULTS_PREFIX: "{{ prefect.variables.gcs_results_prefix }}"
@@ -77,7 +75,6 @@ deployments:
       work_queue_name: default
       job_variables:
         env:
-          GOOGLE_APPLICATION_CREDENTIALS: "/opt/prefect/secrets/tri-demandes-clients-da1709669c29.json"
           GCS_BUCKET_NAME: "{{ prefect.variables.gcs_bucket_name }}"
           GCS_PROCESSED_PREFIX: "{{ prefect.variables.gcs_processed_prefix }}"
           GCS_RESULTS_PREFIX: "{{ prefect.variables.gcs_results_prefix }}"
@@ -101,7 +98,6 @@ deployments:
       work_queue_name: default
       job_variables:
         env:
-          GOOGLE_APPLICATION_CREDENTIALS: "/opt/prefect/secrets/tri-demandes-clients-da1709669c29.json"
           GCS_BUCKET_NAME: "{{ prefect.variables.gcs_bucket_name }}"
           GCS_PROCESSED_PREFIX: "{{ prefect.variables.gcs_processed_prefix }}"
           GCS_RESULTS_PREFIX: "{{ prefect.variables.gcs_results_prefix }}"
@@ -124,7 +120,6 @@ deployments:
       work_queue_name: default
       job_variables:
         env:
-          GOOGLE_APPLICATION_CREDENTIALS: "/opt/prefect/secrets/tri-demandes-clients-da1709669c29.json"
           GCS_BUCKET_NAME: "{{ prefect.variables.gcs_bucket_name }}"
           GCS_PROCESSED_PREFIX: "{{ prefect.variables.gcs_processed_prefix }}"
           GCS_RESULTS_PREFIX: "{{ prefect.variables.gcs_results_prefix }}"
