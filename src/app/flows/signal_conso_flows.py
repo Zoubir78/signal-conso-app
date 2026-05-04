@@ -31,6 +31,10 @@ from prefect import flow, get_run_logger, task
 from prefect.artifacts import create_table_artifact
 from prefect.runtime import deployment as prefect_runtime_deployment
 
+from prefect_gcp import GcpCredentials
+gcp_credentials_block = GcpCredentials.load("my-gcp-creds")
+gcs_client = gcp_credentials_block.get_cloud_storage_client()
+
 # -- Config --------------------------------------------------------------------
 GCS_BUCKET_NAME: str = os.getenv("GCS_BUCKET_NAME", "clean_complaints")
 GCS_PROCESSED_PREFIX: str = os.getenv("GCS_PROCESSED_PREFIX", "processed/")
