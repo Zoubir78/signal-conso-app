@@ -31,9 +31,8 @@ from prefect import flow, get_run_logger, task
 from prefect.artifacts import create_table_artifact
 from prefect.runtime import deployment as prefect_runtime_deployment
 
+from prefect import task
 from prefect_gcp import GcpCredentials
-gcp_credentials_block = GcpCredentials.load("my-gcp-creds")
-gcs_client = gcp_credentials_block.get_cloud_storage_client()
 
 # -- Config --------------------------------------------------------------------
 GCS_BUCKET_NAME: str = os.getenv("GCS_BUCKET_NAME", "clean_complaints")
@@ -42,6 +41,14 @@ GCS_RESULTS_PREFIX: str = os.getenv("GCS_RESULTS_PREFIX", "prefect-results/")
 BOOL_TRUE_VALUES: frozenset[str] = frozenset(
     {"1", "true", "t", "yes", "y", "oui", "vrai", "on"}
 )
+
+@task
+def get_gcs_client_task():
+    # Charge les credentials de manière sécurisée depuis Prefect Cloud
+    gcp_credentials_block = GcpCredentials.load("my-gcp-creds")
+
+    # Retourne directement un client storage.Client() authentifié !
+    return gcp_credentials_block.get_cloud_storage_client()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
