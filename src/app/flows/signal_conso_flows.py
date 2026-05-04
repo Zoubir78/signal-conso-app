@@ -29,10 +29,12 @@ from google.cloud import storage
 # -- Prefect 3.x ---------------------------------------------------------------
 from prefect import flow, get_run_logger, task
 from prefect.artifacts import create_table_artifact
+from prefect.runtime import deployment as prefect_runtime_deployment
 
 # -- Config --------------------------------------------------------------------
 GCS_BUCKET_NAME: str = os.getenv("GCS_BUCKET_NAME", "clean_complaints")
 GCS_PROCESSED_PREFIX: str = os.getenv("GCS_PROCESSED_PREFIX", "processed/")
+GCS_RESULTS_PREFIX: str = os.getenv("GCS_RESULTS_PREFIX", "prefect-results/")
 BOOL_TRUE_VALUES: frozenset[str] = frozenset(
     {"1", "true", "t", "yes", "y", "oui", "vrai", "on"}
 )
@@ -382,17 +384,11 @@ def kpi_signalements_lus_reponse_task(df: pd.DataFrame) -> dict[str, Any]:
 
 @task(
     name="publish-kpi-results",
-    description="Publie les résultats KPI sous forme d'artifact Prefect et JSON.",
+    description="Publie les résultats KPI sous forme d'artifact Prefect, JSON et résumé GCS.",
     tags=["publish"],
 )
 def publish_kpi_results_task(kpis: list[dict[str, Any]], source_blob: str) -> dict[str, Any]:
     logger = get_run_logger()
-
-    summary = {
-        "source": source_blob,
-        "computed_at": _now_iso(),
-        "kpis": kpis,
-    }
 
     table_rows = []
     for k in kpis:
@@ -418,6 +414,44 @@ def publish_kpi_results_task(kpis: list[dict[str, Any]], source_blob: str) -> di
         table=table_rows,
         description=f"KPIs Signal Conso — source : `{source_blob}`",
     )
+
+    summary = {
+        "status": "success",
+        "source": source_blob,
+        "computed_at": _now_iso(),
+        "flow_name": "kpi-pipeline-flow",
+        "deployment_name": None,
+        "deployment_id": None,
+        "flow_run_id": None,
+        "kpis": kpis,
+        "rows": table_rows,
+    }
+
+    try:
+        summary["deployment_name"] = prefect_runtime_deployment.get_name()
+        summary["deployment_id"] = prefect_runtime_deployment.get_id()
+        summary["flow_run_id"] = prefect_runtime_deployment.get_flow_run_id()
+        runtime_params = prefect_runtime_deployment.get_parameters()
+        if isinstance(runtime_params, dict) and runtime_params:
+            summary["parameters"] = runtime_params
+    except Exception:
+        pass
+
+    try:
+        client = storage.Client()
+        bucket = client.bucket(GCS_BUCKET_NAME)
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        blob_name = f"{GCS_RESULTS_PREFIX.rstrip('/')}/prefect_summary_{timestamp}.json"
+        blob = bucket.blob(blob_name)
+        blob.upload_from_string(
+            json.dumps(summary, ensure_ascii=False, indent=2),
+            content_type="application/json",
+        )
+        summary["results_blob"] = blob_name
+        logger.info(f"Résumé Prefect publié dans gs://{GCS_BUCKET_NAME}/{blob_name}")
+    except Exception as exc:
+        logger.warning(f"Impossible de publier le résumé GCS : {exc}")
+        summary["results_error"] = str(exc)
 
     logger.info(f"KPIs publiés : {[k.get('kpi', '?') for k in kpis]}")
     return summary

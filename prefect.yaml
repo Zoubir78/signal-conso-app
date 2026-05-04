@@ -1,15 +1,8 @@
-# ══════════════════════════════════════════════════════════════════════════════
-# prefect.yaml — Signal Conso KPI Pipeline (SECURE VERSION)
-# ══════════════════════════════════════════════════════════════════════════════
-
 name: signal-conso
 
 build: null
 push: null
 
-# ──────────────────────────────────────────────────────────────────────────────
-# PULL STEPS
-# ──────────────────────────────────────────────────────────────────────────────
 pull:
   - prefect.deployments.steps.git_clone:
       id: git_clone
@@ -23,17 +16,9 @@ pull:
       requirements_file: requirements-flows.txt
       stream_output: true
 
-# ──────────────────────────────────────────────────────────────────────────────
-# DEPLOYMENTS
-# ──────────────────────────────────────────────────────────────────────────────
 deployments:
-
-  # ─────────────────────────────
-  # PIPELINE COMPLET
-  # ─────────────────────────────
   - name: signal-conso-pipeline
     version: "1.0.0"
-
     entrypoint: src/app/flows/signal_conso_flows.py:kpi_pipeline_flow
 
     work_pool:
@@ -41,9 +26,10 @@ deployments:
       work_queue_name: default
       job_variables:
         env:
-          # ✅ NON SENSIBLE → Prefect Variables
+          GOOGLE_APPLICATION_CREDENTIALS: "/opt/prefect/secrets/tri-demandes-clients-da1709669c29.json"
           GCS_BUCKET_NAME: "{{ prefect.variables.gcs_bucket_name }}"
           GCS_PROCESSED_PREFIX: "{{ prefect.variables.gcs_processed_prefix }}"
+          GCS_RESULTS_PREFIX: "{{ prefect.variables.gcs_results_prefix }}"
 
     schedule:
       cron: "0 */4 * * *"
@@ -53,19 +39,14 @@ deployments:
     parameters:
       bucket_name: "{{ prefect.variables.gcs_bucket_name }}"
       prefix: "{{ prefect.variables.gcs_processed_prefix }}"
-      period: "Depuis le début du mois"
+      period: "Depuis le debut du mois"
       region: null
       department_label: null
 
     concurrency_limit: 1
 
-
-  # ─────────────────────────────
-  # KPI : NOMBRE SIGNALEMENTS
-  # ─────────────────────────────
   - name: kpi-nombre-signalements
     version: "1.0.0"
-
     entrypoint: src/app/flows/signal_conso_flows.py:flow_nombre_signalements
 
     work_pool:
@@ -73,8 +54,10 @@ deployments:
       work_queue_name: default
       job_variables:
         env:
+          GOOGLE_APPLICATION_CREDENTIALS: "/opt/prefect/secrets/tri-demandes-clients-da1709669c29.json"
           GCS_BUCKET_NAME: "{{ prefect.variables.gcs_bucket_name }}"
           GCS_PROCESSED_PREFIX: "{{ prefect.variables.gcs_processed_prefix }}"
+          GCS_RESULTS_PREFIX: "{{ prefect.variables.gcs_results_prefix }}"
 
     schedule:
       cron: "0 */4 * * *"
@@ -85,13 +68,8 @@ deployments:
 
     concurrency_limit: 1
 
-
-  # ─────────────────────────────
-  # KPI : TRANSMIS GLOBAL
-  # ─────────────────────────────
   - name: kpi-transmis-global
     version: "1.0.0"
-
     entrypoint: src/app/flows/signal_conso_flows.py:flow_transmis_global
 
     work_pool:
@@ -99,8 +77,10 @@ deployments:
       work_queue_name: default
       job_variables:
         env:
+          GOOGLE_APPLICATION_CREDENTIALS: "/opt/prefect/secrets/tri-demandes-clients-da1709669c29.json"
           GCS_BUCKET_NAME: "{{ prefect.variables.gcs_bucket_name }}"
           GCS_PROCESSED_PREFIX: "{{ prefect.variables.gcs_processed_prefix }}"
+          GCS_RESULTS_PREFIX: "{{ prefect.variables.gcs_results_prefix }}"
 
     schedule:
       cron: "0 */4 * * *"
@@ -112,13 +92,8 @@ deployments:
 
     concurrency_limit: 1
 
-
-  # ─────────────────────────────
-  # KPI : LUS AVEC RÉPONSE
-  # ─────────────────────────────
   - name: kpi-signalements-lus-reponse
     version: "1.0.0"
-
     entrypoint: src/app/flows/signal_conso_flows.py:flow_signalements_lus_reponse
 
     work_pool:
@@ -126,8 +101,10 @@ deployments:
       work_queue_name: default
       job_variables:
         env:
+          GOOGLE_APPLICATION_CREDENTIALS: "/opt/prefect/secrets/tri-demandes-clients-da1709669c29.json"
           GCS_BUCKET_NAME: "{{ prefect.variables.gcs_bucket_name }}"
           GCS_PROCESSED_PREFIX: "{{ prefect.variables.gcs_processed_prefix }}"
+          GCS_RESULTS_PREFIX: "{{ prefect.variables.gcs_results_prefix }}"
 
     schedule:
       cron: "0 */4 * * *"
@@ -138,13 +115,8 @@ deployments:
 
     concurrency_limit: 1
 
-
-  # ─────────────────────────────
-  # DAILY REPORT
-  # ─────────────────────────────
   - name: signal-conso-daily-report
     version: "1.0.0"
-
     entrypoint: src/app/flows/signal_conso_flows.py:kpi_pipeline_flow
 
     work_pool:
@@ -152,8 +124,10 @@ deployments:
       work_queue_name: default
       job_variables:
         env:
+          GOOGLE_APPLICATION_CREDENTIALS: "/opt/prefect/secrets/tri-demandes-clients-da1709669c29.json"
           GCS_BUCKET_NAME: "{{ prefect.variables.gcs_bucket_name }}"
           GCS_PROCESSED_PREFIX: "{{ prefect.variables.gcs_processed_prefix }}"
+          GCS_RESULTS_PREFIX: "{{ prefect.variables.gcs_results_prefix }}"
 
     schedule:
       cron: "0 8 * * *"
@@ -163,34 +137,8 @@ deployments:
     parameters:
       bucket_name: "{{ prefect.variables.gcs_bucket_name }}"
       prefix: "{{ prefect.variables.gcs_processed_prefix }}"
-      period: "Depuis le début du mois"
+      period: "Depuis le debut du mois"
       region: null
       department_label: null
 
     concurrency_limit: 1
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# NOTES IMPORTANTES
-# ──────────────────────────────────────────────────────────────────────────────
-#
-# 🔐 1. VARIABLES (non sensibles)
-#   prefect variable set gcs_bucket_name "clean_complaints"
-#   prefect variable set gcs_processed_prefix "processed/"
-#
-# 🔐 2. SECRET GCP (CRITIQUE)
-#   prefect block register -m prefect.blocks.system
-#
-#   Puis :
-#   prefect block create secret signal-conso-gcp-sa-json
-#   (coller le JSON du service account)
-#
-# ⚠️ NE JAMAIS mettre le JSON dans le YAML
-#
-# 🚀 3. DEPLOY
-#   prefect deploy --all
-#
-# ⚙️ 4. WORKER
-#   prefect worker start --pool signal-conso-pool
-#
-# ──────────────────────────────────────────────────────────────────────────────
