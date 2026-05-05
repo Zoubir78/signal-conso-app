@@ -647,6 +647,8 @@ st.markdown(
 # ─────────────────────────────────────────────
 df, source_name = load_latest_dataset()
 
+filtered_df = df.copy()
+
 if not df.empty:
     if "creationdate" in df.columns:
         df["creationdate"] = pd.to_datetime(df["creationdate"], errors="coerce")
