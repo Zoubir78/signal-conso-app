@@ -5,7 +5,7 @@ import json
 import os
 import sys
 from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -20,52 +20,18 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 from google.cloud import storage
+from google.oauth2 import service_account
 
 from scripts.pipeline import run_pipeline
 
 # ─────────────────────────────────────────────
-# CONFIG & API URLS
+# CONFIG
 # ─────────────────────────────────────────────
-API_BASE_URL = os.getenv("API_URL", "http://localhost:8000").rstrip("/")
-PREDICTION_URL = f"{API_BASE_URL}/predictions/"
-FLOWS_API_URL = f"{API_BASE_URL}/flows"
-
+PREDICTION_URL = os.getenv("PREDICTION_URL", "http://api:8000/predictions/").rstrip("/") + "/"
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "clean_complaints")
-GCS_RESULTS_PREFIX = os.getenv("PREFECT_RESULTS_PREFIX", "prefect-results/")
 DEFAULT_MODEL_PATH = os.getenv("MODEL_PATH", "models/model.joblib")
 DEFAULT_MODEL_VER = os.getenv("MODEL_VERSION", "logreg-v1")
-MODEL_REFRESH_SECONDS = 90
 
-PREFECT_FLOW_MAPPING = {
-    "Pipeline complet": {
-        "endpoint": "/pipeline",
-        "method": "POST",
-        "description": "Extraction GCS → filtrage → calcul des 4 KPIs → publication.",
-        "type": "json"
-    },
-    "KPI nombre signalements": {
-        "endpoint": "/nombre-signalements",
-        "method": "POST",
-        "description": "Compte le nombre total de signalements.",
-        "type": "query"
-    },
-    "KPI transmis global": {
-        "endpoint": "/transmis",
-        "method": "POST",
-        "description": "Calcule la part des signalements transmis et transmis lus.",
-        "type": "json"
-    },
-    "KPI lus + réponse": {
-        "endpoint": "/lus-reponse",
-        "method": "POST",
-        "description": "Calcule la part des signalements lus ayant reçu une réponse.",
-        "type": "query"
-    }
-}
-
-# ─────────────────────────────────────────────
-# CONFIGURATION STREAMLIT & UI
-# ─────────────────────────────────────────────
 st.set_page_config(
     page_title="SignalConso · Intelligence",
     page_icon="🛡️",
@@ -394,14 +360,7 @@ def _bool_series(s: pd.Series) -> pd.Series:
 
 
 def _department_label(row: pd.Series) -> str:
-    def _clean_dep_code(v: Any) -> str:
-        if _is_missing(v):
-            return ""
-        txt = str(v).strip().replace(".0", "")
-        txt = txt.zfill(2) if txt.isdigit() and len(txt) <= 2 else txt
-        return _normalize_label(txt)
-
-    code = _clean_dep_code(row.get("dep_code", ""))
+    code = _normalize_label(row.get("dep_code", "")) if not _is_missing(row.get("dep_code")) else ""
     name = _normalize_label(row.get("dep_name", "")) if not _is_missing(row.get("dep_name")) else ""
     if code and name:
         return f"{code} – {name}"
@@ -461,119 +420,75 @@ def _keyword_freq(df: pd.DataFrame, limit: int = 20) -> pd.Series:
 # GCS HELPERS
 # ─────────────────────────────────────────────
 @st.cache_resource
-def _gcs() -> storage.Client:
-    return storage.Client()
+def _gcs() -> storage.Client | None:
+    # Streamlit Cloud / local / Docker compatible:
+    # - st.secrets["google_cloud"] for Streamlit Cloud
+    # - GOOGLE_APPLICATION_CREDENTIALS for local/Docker
+    # - fallback to ADC if available
+    try:
+        project_id = st.secrets.get("GCP_PROJECT_ID", os.getenv("GCP_PROJECT_ID"))
+        if "google_cloud" in st.secrets:
+            creds = service_account.Credentials.from_service_account_info(
+                dict(st.secrets["google_cloud"])
+            )
+            return storage.Client(project=project_id, credentials=creds)
+
+        gac = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        if gac and Path(gac).expanduser().exists():
+            return storage.Client(project=project_id)
+
+        return storage.Client(project=project_id)
+    except Exception:
+        return None
 
 
 @st.cache_data(ttl=120)
 def list_blobs(prefix: str) -> list[str]:
-    return [b.name for b in _gcs().bucket(GCS_BUCKET_NAME).list_blobs(prefix=prefix)]
+    client = _gcs()
+    if client is None:
+        return []
+    try:
+        return [b.name for b in client.bucket(GCS_BUCKET_NAME).list_blobs(prefix=prefix)]
+    except Exception:
+        return []
 
 
 @st.cache_data(ttl=120)
 def load_latest_dataset() -> tuple[pd.DataFrame, str | None]:
-    blobs = list(_gcs().bucket(GCS_BUCKET_NAME).list_blobs(prefix="processed/"))
-    if not blobs:
+    client = _gcs()
+    if client is None:
         return pd.DataFrame(), None
-    latest = max(blobs, key=lambda b: b.updated or datetime.min.replace(tzinfo=datetime.UTC))
-    data = latest.download_as_bytes()
-    return pd.read_csv(BytesIO(data)), latest.name
+    try:
+        blobs = list(client.bucket(GCS_BUCKET_NAME).list_blobs(prefix="processed/"))
+        if not blobs:
+            return pd.DataFrame(), None
+        latest = max(blobs, key=lambda b: b.updated or datetime.min.replace(tzinfo=datetime.UTC))
+        data = latest.download_as_bytes()
+        return pd.read_csv(BytesIO(data)), latest.name
+    except Exception:
+        return pd.DataFrame(), None
 
 
 @st.cache_data(ttl=120)
 def load_evaluation_report() -> dict | None:
+    client = _gcs()
+    if client is None:
+        return None
     try:
-        blob = _gcs().bucket(GCS_BUCKET_NAME).blob("models/evaluation_report.json")
+        blob = client.bucket(GCS_BUCKET_NAME).blob("models/evaluation_report.json")
         if blob.exists():
             return json.loads(blob.download_as_text())
-    except Exception:
-        pass
-    return None
-
-
-def download_model(blob_name: str, local: str = "/tmp/tmp_model.joblib") -> str:
-    _gcs().bucket(GCS_BUCKET_NAME).blob(blob_name).download_to_filename(local)
-    return local
-
-
-def _prefect_run_params(
-    *,
-    bucket_name: str,
-    prefix: str,
-    reference_date: date | None,
-    period: str,
-    region: str | None,
-    department_label: str | None,
-    kpi_type: str | None = None,
-) -> dict[str, Any]:
-    params: dict[str, Any] = {
-        "bucket_name": bucket_name.strip() or GCS_BUCKET_NAME,
-        "prefix": prefix.strip() or "processed/",
-        "reference_date": reference_date.isoformat() if reference_date else None,
-        "period": period,
-        "region": region.strip() if isinstance(region, str) else region,
-        "department_label": department_label.strip() if isinstance(department_label, str) else department_label,
-    }
-    if kpi_type:
-        params["kpi_type"] = kpi_type
-    return {k: v for k, v in params.items() if v not in (None, "")}
-
-
-def _fmt_dt(value: Any) -> str:
-    if value in (None, ""):
-        return "—"
-    try:
-        ts = pd.to_datetime(value, utc=True, errors="coerce")
-        if pd.isna(ts):
-            return str(value)
-        return ts.tz_convert("Europe/Paris").strftime("%d/%m/%Y %H:%M")
-    except Exception:
-        return str(value)
-
-
-def _escape_md_cell(value: Any) -> str:
-    text = "—" if value in (None, "") else str(value)
-    return text.replace("|", r"\|").replace("\n", " ")
-
-
-def _load_latest_prefect_summary() -> dict[str, Any] | None:
-    try:
-        blobs = [b for b in list(_gcs().bucket(GCS_BUCKET_NAME).list_blobs(prefix=GCS_RESULTS_PREFIX))]
-        if not blobs:
-            return None
-        latest = max(blobs, key=lambda b: b.updated or datetime.min.replace(tzinfo=datetime.UTC))
-        data = latest.download_as_text()
-        summary = json.loads(data)
-        if isinstance(summary, dict):
-            summary.setdefault("results_blob", latest.name)
-            return summary
     except Exception:
         return None
     return None
 
 
-def _prefect_result_markdown(result: dict[str, Any]) -> str:
-    """Génère le rendu Markdown des résultats Prefect."""
-    status_raw = str(result.get("status", result.get("state", "success"))).strip().lower()
-    status_icon = "🟢" if status_raw in ["success", "completed"] else "🔴" if status_raw in ["failed", "crashed"] else "🔵"
-
-    lines = [
-        f"### {status_icon} Dernier résultat Prefect",
-        f"**Déploiement** : `{result.get('deployment_name', '—')}`",
-        f"**Statut** : {status_raw.title()}",
-        f"**Exécuté le** : {result.get('computed_at', '—')}",
-    ]
-
-    kpis = result.get("kpis")
-    if isinstance(kpis, list) and kpis:
-        lines.extend(["", "| KPI | Valeur | Détail |", "|---|---:|---|"])
-        for k in kpis:
-            label = k.get("label", "—")
-            val = k.get("value_pct") or k.get("value") or "N/A"
-            det = f"{k['numerator']} / {k['denominator']}" if "numerator" in k else "—"
-            lines.append(f"| {label} | {val} | {det} |")
-    return "\n".join(lines)
-
+def download_model(blob_name: str, local: str = "/tmp/tmp_model.joblib") -> str:
+    client = _gcs()
+    if client is None:
+        raise RuntimeError("Connexion GCS indisponible.")
+    client.bucket(GCS_BUCKET_NAME).blob(blob_name).download_to_filename(local)
+    return local
 
 
 # ─────────────────────────────────────────────
@@ -628,29 +543,6 @@ def predict_api(text: str, model_blob: str | None = None) -> dict:
     r = requests.post(PREDICTION_URL, json=payload, timeout=30)
     r.raise_for_status()
     return r.json()
-
-@st.cache_resource
-def _gcs() -> storage.Client:
-    return storage.Client()
-
-def _run_flow_via_api(selection_key: str, parameters: dict[str, Any]) -> dict[str, Any]:
-    config = PREFECT_FLOW_MAPPING.get(selection_key)
-    if not config: raise ValueError(f"Config introuvable pour {selection_key}")
-
-    url = f"{FLOWS_API_URL}{config['endpoint']}"
-    clean_params = {k: v for k, v in parameters.items() if v not in (None, "")}
-
-    if "reference_date" in clean_params and isinstance(clean_params["reference_date"], date):
-        clean_params["reference_date"] = clean_params["reference_date"].isoformat()
-
-    if config["method"] == "POST":
-        resp = requests.post(url, json=clean_params if config["type"] == "json" else None,
-                             params=None if config["type"] == "json" else clean_params, timeout=60)
-    else:
-        resp = requests.get(url, params=clean_params, timeout=60)
-
-    resp.raise_for_status()
-    return resp.json()
 
 
 # ─────────────────────────────────────────────
@@ -711,33 +603,6 @@ with st.sidebar:
         st.warning("Aucun modèle .joblib trouvé dans `models/`.")
         st.session_state["selected_model_blob"] = DEFAULT_MODEL_PATH
         selected_model_blob = DEFAULT_MODEL_PATH
-
-    st.divider()
-
-    # Section Prefect
-    st.markdown("#### 🌀 Prefect Orchestration")
-    deployment_key = st.selectbox("Déploiement à lancer", list(PREFECT_FLOW_MAPPING.keys()),
-                                  format_func=lambda k: f"{k}")
-
-    flow_params = {}
-    with st.expander("Configuration", expanded=True):
-        flow_params["bucket_name"] = st.text_input("Bucket", value=GCS_BUCKET_NAME)
-        flow_params["period"] = st.selectbox("Période", ["Depuis le début du mois", "7 derniers jours"])
-        flow_params["reference_date"] = st.date_input("Date", value=date.today())
-
-    if st.button("🚀 Lancer le déploiement", type="primary"):
-        with st.spinner("Lancement..."):
-            try:
-                res = _run_flow_via_api(deployment_key, flow_params)
-                st.session_state["prefect_last_result"] = res
-                st.success("Flow déclenché !")
-            except Exception as e:
-                st.error(f"Erreur : {e}")
-
-    # Affichage du résultat
-    last_res = st.session_state.get("prefect_last_result")
-    if last_res:
-        st.markdown(_prefect_result_markdown(last_res), unsafe_allow_html=True)
 
     st.divider()
 
@@ -815,51 +680,49 @@ with tab_overview:
     if df.empty:
         st.warning("Aucun dataset trouvé dans `processed/` sur GCS.")
     else:
-        # ── Détection / normalisation de la colonne date ─────────────
-        DATE_COL_CANDIDATES = ["creationdate", "creation_date", "date_creation", "created_at"]
-        date_col = next((c for c in DATE_COL_CANDIDATES if c in df.columns), None)
-
-        # On fixe la date de référence à AUJOURD'HUI par défaut
-        ref_date = date.today()
-
-        if date_col is None:
-            st.warning("Aucune colonne de date trouvée dans le dataset.")
-            working_df = df.copy()
-        else:
-            working_df = df.copy()
-            working_df[date_col] = pd.to_datetime(working_df[date_col], errors="coerce")
-            working_df["record_date"] = working_df[date_col].dt.normalize()
-
-        # ── Filtres ──────────────────────────────────────────────────
+        # ── Filtres ───────────────────────────────
         f1, f2, f3, f4 = st.columns([1.2, 1.2, 1.5, 1.5])
+        available_dates = (
+            df["creationdate"].dropna().dt.date
+            if "creationdate" in df.columns
+            else pd.Series(dtype=object)
+        )
+        ref_date = available_dates.max() if not available_dates.empty else date.today()
 
         with f1:
-            sel_date = st.date_input(
-                "Date de référence",
-                value=ref_date,  # Affichera toujours aujourd'hui au refresh
-                format="DD/MM/YYYY",
-            )
-
+            sel_date = st.date_input("Date de référence", value=ref_date, format="DD/MM/YYYY")
         with f2:
             period = st.selectbox(
-                "Période",
-                ["Depuis le début du mois", "7 derniers jours", "Toutes les données"],
-                index=0,  # Par défaut sur le mois en cours
+                "Période", ["Depuis le début du mois", "7 derniers jours", "Toutes les données"]
             )
-
         with f3:
-            regions = ["Toutes les régions"]
-            if "reg_name" in working_df.columns:
-                regions += sorted(working_df["reg_name"].dropna().astype(str).unique().tolist())
+            regions = (
+                ["Toutes les régions"]
+                + sorted(df["reg_name"].dropna().astype(str).unique().tolist())
+                if "reg_name" in df.columns
+                else ["Toutes les régions"]
+            )
             sel_region = st.selectbox("Région", regions)
+        with f4:
+            df_r = (
+                df[df["reg_name"].astype(str) == sel_region]
+                if sel_region != "Toutes les régions" and "reg_name" in df.columns
+                else df
+            )
+            depts = ["Tous les départements"] + sorted(
+                df_r["department_label"].dropna().astype(str).unique().tolist()
+            )
+            sel_dept = st.selectbox("Département", depts)
 
-        # Filtrage des données
-        filtered_df = working_df.copy()
+        # ── Filtrage ──────────────────────────────
+        filtered_df = df.copy()
 
-        if "record_date" in filtered_df.columns:
-            filtered_df = filtered_df[filtered_df["record_date"].notna()].copy()
+        if "creationdate" in filtered_df.columns:
+            filtered_df["creationdate"] = pd.to_datetime(filtered_df["creationdate"], errors="coerce")
+            filtered_df = filtered_df.dropna(subset=["creationdate"]).copy()
+            filtered_df["creation_day"] = filtered_df["creationdate"].dt.normalize()
+
             ref = pd.Timestamp(sel_date)
-
             if period == "Depuis le début du mois":
                 start = ref.replace(day=1)
                 end = ref
@@ -867,30 +730,16 @@ with tab_overview:
                 start = ref - pd.Timedelta(days=6)
                 end = ref
             else:
-                start = filtered_df["record_date"].min()
+                start = filtered_df["creation_day"].min()
                 end = ref
 
             filtered_df = filtered_df[
-                (filtered_df["record_date"] >= start.normalize())
-                & (filtered_df["record_date"] <= end.normalize())
+                (filtered_df["creation_day"] >= start.normalize())
+                & (filtered_df["creation_day"] <= end.normalize())
             ]
-
-            st.caption(
-                f"Filtre actif : {start.date()} → {end.date()} · {len(filtered_df):,} ligne(s)"
-            )
 
         if sel_region != "Toutes les régions" and "reg_name" in filtered_df.columns:
             filtered_df = filtered_df[filtered_df["reg_name"].astype(str) == sel_region]
-
-        with f4:
-            if "department_label" in filtered_df.columns:
-                dept_choices = ["Tous les départements"] + sorted(
-                    filtered_df["department_label"].dropna().astype(str).unique().tolist()
-                )
-            else:
-                dept_choices = ["Tous les départements"]
-            sel_dept = st.selectbox("Département", dept_choices)
-
         if sel_dept != "Tous les départements" and "department_label" in filtered_df.columns:
             filtered_df = filtered_df[filtered_df["department_label"] == sel_dept]
 
@@ -899,18 +748,23 @@ with tab_overview:
         if filtered_df.empty:
             st.info("Aucune donnée pour les filtres sélectionnés.")
         else:
-            # ── KPIs ──────────────────────────────────────────────────
+            # ── KPIs ──────────────────────────────────
             total = len(filtered_df)
-
-            # Utilisation de .get() ou vérification pour éviter les erreurs de colonnes manquantes
-            def get_sum(col):
-                return (
-                    int(_bool_series(filtered_df[col]).sum()) if col in filtered_df.columns else 0
-                )
-
-            transmis = get_sum("signalement_transmis")
-            lus = get_sum("signalement_lu")
-            reponses = get_sum("signalement_reponse")
+            transmis = (
+                int(_bool_series(filtered_df["signalement_transmis"]).sum())
+                if "signalement_transmis" in filtered_df.columns
+                else 0
+            )
+            lus = (
+                int(_bool_series(filtered_df["signalement_lu"]).sum())
+                if "signalement_lu" in filtered_df.columns
+                else 0
+            )
+            reponses = (
+                int(_bool_series(filtered_df["signalement_reponse"]).sum())
+                if "signalement_reponse" in filtered_df.columns
+                else 0
+            )
 
             r_trans = transmis / total if total else 0
             r_lus = lus / transmis if transmis else 0
@@ -918,10 +772,11 @@ with tab_overview:
 
             k1, k2, k3, k4 = st.columns(4)
             k1.metric("Signalements", f"{total:,}")
-            k2.metric("Taux transmission", f"{r_trans:.1%}")
-            k3.metric("Taux lecture", f"{r_lus:.1%}")
-            k4.metric("Taux réponse", f"{r_rep:.1%}")
+            k2.metric("Taux transmission", f"{r_trans:.1%}", help="Signalements transmis / total")
+            k3.metric("Taux lecture", f"{r_lus:.1%}", help="Lus / transmis")
+            k4.metric("Taux réponse", f"{r_rep:.1%}", help="Réponses / lus")
 
+            # Progress bars visuelles
             for rate, label, num, den in [
                 (r_trans, "Transmission", transmis, total),
                 (r_lus, "Lecture", lus, transmis),
@@ -935,23 +790,16 @@ with tab_overview:
 
             st.divider()
 
-            # ── Évolution temporelle ──────────────────────────────────
+            # ── Évolution temporelle ──────────────────
             st.markdown(
                 '<div class="sec-header">📈 Évolution des signalements</div>',
                 unsafe_allow_html=True,
             )
-            if "record_date" in filtered_df.columns:
-                timeline = (
-                    filtered_df.groupby(filtered_df["record_date"].dt.date)
-                    .size()
-                    .reset_index(name="count")
-                    .rename(columns={"record_date": "date"})
-                )
-
-                # Utilisation de x="date" car on vient de renommer la colonne
+            if "creationdate" in filtered_df.columns:
+                timeline = filtered_df.groupby(filtered_df["creationdate"].dt.date).size().reset_index(name="count")
                 fig = px.area(
                     timeline,
-                    x="date",
+                    x="creationdate",
                     y="count",
                     color_discrete_sequence=["#1f6feb"],
                     template="plotly_dark",
@@ -959,13 +807,16 @@ with tab_overview:
                 fig.update_layout(
                     paper_bgcolor="#0d1117",
                     plot_bgcolor="#0d1117",
+                    xaxis=dict(gridcolor="#21262d"),
+                    yaxis=dict(gridcolor="#21262d"),
                     margin=dict(l=0, r=0, t=10, b=0),
                     height=260,
                     showlegend=False,
                 )
+                fig.update_traces(fillcolor="rgba(31,111,235,0.15)", line_width=2)
                 st.plotly_chart(fig, width="stretch")
 
-            # ── Top catégories et Mots-clés ───────────────────────────
+            # ── Top catégories ────────────────────────
             col_a, col_b = st.columns(2)
             with col_a:
                 st.markdown(
@@ -975,12 +826,20 @@ with tab_overview:
                     cat_s = _frequency(filtered_df, "category", limit=12)
                     if not cat_s.empty:
                         fig = px.bar(
-                            x=cat_s.values, y=cat_s.index, orientation="h", template="plotly_dark"
+                            x=cat_s.values,
+                            y=cat_s.index,
+                            orientation="h",
+                            color_discrete_sequence=["#1f6feb"],
+                            template="plotly_dark",
                         )
                         fig.update_layout(
-                            yaxis=dict(autorange="reversed"),
-                            height=340,
+                            paper_bgcolor="#0d1117",
+                            plot_bgcolor="#0d1117",
+                            xaxis=dict(gridcolor="#21262d"),
+                            yaxis=dict(gridcolor="#21262d", autorange="reversed"),
                             margin=dict(l=0, r=0, t=10, b=0),
+                            height=340,
+                            showlegend=False,
                         )
                         st.plotly_chart(fig, width="stretch")
 
@@ -996,20 +855,24 @@ with tab_overview:
                         template="plotly_dark",
                     )
                     fig.update_layout(
-                        yaxis=dict(autorange="reversed"),
-                        height=340,
+                        paper_bgcolor="#0d1117",
+                        plot_bgcolor="#0d1117",
+                        xaxis=dict(gridcolor="#21262d"),
+                        yaxis=dict(gridcolor="#21262d", autorange="reversed"),
                         margin=dict(l=0, r=0, t=10, b=0),
+                        height=340,
+                        showlegend=False,
                     )
                     st.plotly_chart(fig, width="stretch")
 
-            # ── Aperçu données ────────────────────────────────────────
+            # ── Aperçu données ────────────────────────
             st.markdown(
                 '<div class="sec-header">📋 Aperçu des données</div>', unsafe_allow_html=True
             )
             preview_cols = [
                 c
                 for c in [
-                    "record_date",
+                    "creationdate",
                     "department_label",
                     "reg_name",
                     "category",
@@ -1042,12 +905,7 @@ with tab_map:
                 geojson = json.load(resp)
 
             dep_counts = (
-                filtered_df["dep_code"]
-                .astype(str)
-                .str.strip()
-                .str.zfill(2)
-                .value_counts()
-                .reset_index()
+                filtered_df["dep_code"].astype(str).str.strip().str.zfill(2).value_counts().reset_index()
             )
             dep_counts.columns = ["code", "count"]
 
