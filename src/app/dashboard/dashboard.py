@@ -4,7 +4,6 @@ import ast
 import json
 import os
 import sys
-import subprocess
 from collections import Counter
 from datetime import date, datetime
 from io import BytesIO
@@ -25,120 +24,48 @@ from google.cloud import storage
 from scripts.pipeline import run_pipeline
 
 # ─────────────────────────────────────────────
-# PREFECT HELPERS
+# CONFIG & API URLS
 # ─────────────────────────────────────────────
-# Le tableau de bord déclenche les déploiements Prefect par leur nom.
-# Cela évite de dépendre d'un import Python du module de flow dans l'application Streamlit.
-PREFECT_DEPLOYMENTS: dict[str, dict[str, str]] = {
-    "Pipeline complet": {
-        "name": "kpi-pipeline-flow/signal-conso-pipeline",
-        "description": "Extraction GCS → filtrage → calcul des 4 KPIs → publication.",
-    },
-    "KPI nombre signalements": {
-        "name": "flow-nombre-signalements/kpi-nombre-signalements",
-        "description": "Compte le nombre total de signalements.",
-    },
-    "KPI transmis global": {
-        "name": "flow-transmis-global/kpi-transmis-global",
-        "description": "Calcule la part des signalements transmis et transmis lus.",
-    },
-    "KPI lus + réponse": {
-        "name": "flow-signalements-lus-reponse/kpi-signalements-lus-reponse",
-        "description": "Calcule la part des signalements lus ayant reçu une réponse.",
-    },
-    "Daily report": {
-        "name": "kpi-pipeline-flow/signal-conso-daily-report",
-        "description": "Rejoue le pipeline complet avec le planning quotidien.",
-    },
-}
+API_BASE_URL = os.getenv("API_URL", "http://localhost:8000").rstrip("/")
+PREDICTION_URL = f"{API_BASE_URL}/predictions/"
+FLOWS_API_URL = f"{API_BASE_URL}/flows"
 
-
-def _prefect_backend() -> str | None:
-    """Retourne 'python' si Prefect SDK est disponible, 'cli' si le binaire est présent."""
-    try:
-        from prefect.deployments import run_deployment  # noqa: F401
-
-        return "python"
-    except Exception:
-        pass
-
-    from shutil import which
-
-    return "cli" if which("prefect") else None
-
-
-
-def _run_prefect_deployment(deployment_name: str, parameters: dict[str, Any] | None = None) -> dict[str, Any]:
-    backend = _prefect_backend()
-    if backend is None:
-        raise RuntimeError("Prefect n'est pas disponible dans cet environnement.")
-
-    clean_params = {
-        k: v
-        for k, v in (parameters or {}).items()
-        if v is not None and v != ""
-    }
-
-    if backend == "python":
-        from prefect.deployments import run_deployment
-
-        run = run_deployment(name=deployment_name, parameters=clean_params or None)
-        payload: dict[str, Any] = {
-            "backend": "python",
-            "deployment": deployment_name,
-            "parameters": clean_params,
-            "flow_run": str(run),
-        }
-        if hasattr(run, "model_dump"):
-            try:
-                payload["flow_run_data"] = run.model_dump()
-            except Exception:
-                pass
-        return payload
-
-    cmd = [
-        sys.executable,
-        "-m",
-        "prefect",
-        "deployment",
-        "run",
-        deployment_name,
-        "--watch",
-        "--watch-timeout",
-        "7200",
-    ]
-    for key, value in clean_params.items():
-        if isinstance(value, date):
-            value = value.isoformat()
-        cmd.extend(["--param", f"{key}={json.dumps(value, ensure_ascii=False)}"])
-
-    completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if completed.returncode != 0:
-        raise RuntimeError(
-            "Commande Prefect en échec\n"
-            f"CMD: {' '.join(cmd)}\n"
-            f"STDOUT:\n{completed.stdout or '—'}\n"
-            f"STDERR:\n{completed.stderr or '—'}"
-        )
-
-    return {
-        "backend": "cli",
-        "deployment": deployment_name,
-        "parameters": clean_params,
-        "stdout": completed.stdout,
-        "stderr": completed.stderr,
-        "command": cmd,
-    }
-
-# ─────────────────────────────────────────────
-# CONFIG
-# ─────────────────────────────────────────────
-PREDICTION_URL = os.getenv("PREDICTION_URL", "http://api:8000/predictions/").rstrip("/") + "/"
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "clean_complaints")
 GCS_RESULTS_PREFIX = os.getenv("PREFECT_RESULTS_PREFIX", "prefect-results/")
 DEFAULT_MODEL_PATH = os.getenv("MODEL_PATH", "models/model.joblib")
 DEFAULT_MODEL_VER = os.getenv("MODEL_VERSION", "logreg-v1")
+MODEL_REFRESH_SECONDS = 90
 
+PREFECT_FLOW_MAPPING = {
+    "Pipeline complet": {
+        "endpoint": "/pipeline",
+        "method": "POST",
+        "description": "Extraction GCS → filtrage → calcul des 4 KPIs → publication.",
+        "type": "json"
+    },
+    "KPI nombre signalements": {
+        "endpoint": "/nombre-signalements",
+        "method": "POST",
+        "description": "Compte le nombre total de signalements.",
+        "type": "query"
+    },
+    "KPI transmis global": {
+        "endpoint": "/transmis",
+        "method": "POST",
+        "description": "Calcule la part des signalements transmis et transmis lus.",
+        "type": "json"
+    },
+    "KPI lus + réponse": {
+        "endpoint": "/lus-reponse",
+        "method": "POST",
+        "description": "Calcule la part des signalements lus ayant reçu une réponse.",
+        "type": "query"
+    }
+}
+
+# ─────────────────────────────────────────────
+# CONFIGURATION STREAMLIT & UI
+# ─────────────────────────────────────────────
 st.set_page_config(
     page_title="SignalConso · Intelligence",
     page_icon="🛡️",
@@ -626,75 +553,25 @@ def _load_latest_prefect_summary() -> dict[str, Any] | None:
 
 
 def _prefect_result_markdown(result: dict[str, Any]) -> str:
+    """Génère le rendu Markdown des résultats Prefect."""
     status_raw = str(result.get("status", result.get("state", "success"))).strip().lower()
-    status_label = {
-        "success": "Succès",
-        "completed": "Succès",
-        "failed": "Échec",
-        "crashed": "Crash",
-        "running": "En cours",
-        "pending": "En attente",
-        "scheduled": "Planifié",
-    }.get(status_raw, status_raw.title() or "—")
-    status_icon = {
-        "success": "🟢",
-        "completed": "🟢",
-        "running": "🔵",
-        "pending": "🟠",
-        "scheduled": "🟠",
-        "failed": "🔴",
-        "crashed": "🔴",
-    }.get(status_raw, "🟢")
+    status_icon = "🟢" if status_raw in ["success", "completed"] else "🔴" if status_raw in ["failed", "crashed"] else "🔵"
 
     lines = [
         f"### {status_icon} Dernier résultat Prefect",
-        "",
-        f"**Déploiement** : `{_escape_md_cell(result.get('deployment_name') or result.get('deployment') or '—')}`",
-        f"**Flow run** : `{_escape_md_cell(result.get('flow_run_id') or result.get('flow_run') or '—')}`",
-        f"**Statut** : {status_label}",
-        f"**Exécuté le** : {_fmt_dt(result.get('computed_at') or result.get('finished_at') or result.get('updated'))}",
+        f"**Déploiement** : `{result.get('deployment_name', '—')}`",
+        f"**Statut** : {status_raw.title()}",
+        f"**Exécuté le** : {result.get('computed_at', '—')}",
     ]
-
-    if result.get("source"):
-        lines.append(f"**Source** : `{_escape_md_cell(result['source'])}`")
-    if result.get("results_blob"):
-        lines.append(f"**Artefact** : `{_escape_md_cell(result['results_blob'])}`")
-
-    params = result.get("parameters")
-    if isinstance(params, dict) and params:
-        pretty_params = []
-        for key in ["bucket_name", "prefix", "reference_date", "period", "region", "department_label", "kpi_type"]:
-            if key in params and params[key] not in (None, ""):
-                pretty_params.append(f"`{key}`={_escape_md_cell(params[key])}")
-        if pretty_params:
-            lines.append(f"**Paramètres** : {' · '.join(pretty_params)}")
 
     kpis = result.get("kpis")
     if isinstance(kpis, list) and kpis:
-        lines.extend([
-            "",
-            "| KPI | Valeur | Détail |",
-            "|---|---:|---|",
-        ])
+        lines.extend(["", "| KPI | Valeur | Détail |", "|---|---:|---|"])
         for k in kpis:
-            if not isinstance(k, dict):
-                continue
-            label = _escape_md_cell(k.get("label") or k.get("kpi") or "—")
-            if k.get("value_pct"):
-                value = _escape_md_cell(k["value_pct"])
-            elif k.get("value") is not None:
-                value = _escape_md_cell(k["value"])
-            else:
-                value = _escape_md_cell(k.get("error") or "N/A")
-            if k.get("numerator") is not None and k.get("denominator") is not None:
-                detail = _escape_md_cell(f"{k['numerator']} / {k['denominator']}")
-            else:
-                detail = "—"
-            lines.append(f"| {label} | {value} | {detail} |")
-    else:
-        lines.append("")
-        lines.append("_Aucun KPI n'a été publié pour ce run._")
-
+            label = k.get("label", "—")
+            val = k.get("value_pct") or k.get("value") or "N/A"
+            det = f"{k['numerator']} / {k['denominator']}" if "numerator" in k else "—"
+            lines.append(f"| {label} | {val} | {det} |")
     return "\n".join(lines)
 
 
@@ -751,6 +628,29 @@ def predict_api(text: str, model_blob: str | None = None) -> dict:
     r = requests.post(PREDICTION_URL, json=payload, timeout=30)
     r.raise_for_status()
     return r.json()
+
+@st.cache_resource
+def _gcs() -> storage.Client:
+    return storage.Client()
+
+def _run_flow_via_api(selection_key: str, parameters: dict[str, Any]) -> dict[str, Any]:
+    config = PREFECT_FLOW_MAPPING.get(selection_key)
+    if not config: raise ValueError(f"Config introuvable pour {selection_key}")
+
+    url = f"{FLOWS_API_URL}{config['endpoint']}"
+    clean_params = {k: v for k, v in parameters.items() if v not in (None, "")}
+
+    if "reference_date" in clean_params and isinstance(clean_params["reference_date"], date):
+        clean_params["reference_date"] = clean_params["reference_date"].isoformat()
+
+    if config["method"] == "POST":
+        resp = requests.post(url, json=clean_params if config["type"] == "json" else None,
+                             params=None if config["type"] == "json" else clean_params, timeout=60)
+    else:
+        resp = requests.get(url, params=clean_params, timeout=60)
+
+    resp.raise_for_status()
+    return resp.json()
 
 
 # ─────────────────────────────────────────────
@@ -814,118 +714,30 @@ with st.sidebar:
 
     st.divider()
 
-    st.markdown("#### 🌀 Prefect")
-    st.caption(
-        "Déploiements définis dans `prefect.yaml` : pipeline complet, KPI nombre signalements, transmis global, lus + réponse, daily report."
-    )
+    # Section Prefect
+    st.markdown("#### 🌀 Prefect Orchestration")
+    deployment_key = st.selectbox("Déploiement à lancer", list(PREFECT_FLOW_MAPPING.keys()),
+                                  format_func=lambda k: f"{k}")
 
-    prefect_backend = _prefect_backend()
-    if prefect_backend is None:
-        st.warning("Prefect n'est pas disponible dans cet environnement Streamlit.")
-    else:
-        st.success(f"Backend Prefect détecté : {prefect_backend}")
+    flow_params = {}
+    with st.expander("Configuration", expanded=True):
+        flow_params["bucket_name"] = st.text_input("Bucket", value=GCS_BUCKET_NAME)
+        flow_params["period"] = st.selectbox("Période", ["Depuis le début du mois", "7 derniers jours"])
+        flow_params["reference_date"] = st.date_input("Date", value=date.today())
 
-        deployment_key = st.selectbox(
-            "Déploiement à lancer",
-            list(PREFECT_DEPLOYMENTS.keys()),
-            format_func=lambda k: f"{k} — {PREFECT_DEPLOYMENTS[k]['description']}",
-            key="prefect_deployment_key",
-        )
+    if st.button("🚀 Lancer le déploiement", type="primary"):
+        with st.spinner("Lancement..."):
+            try:
+                res = _run_flow_via_api(deployment_key, flow_params)
+                st.session_state["prefect_last_result"] = res
+                st.success("Flow déclenché !")
+            except Exception as e:
+                st.error(f"Erreur : {e}")
 
-        deployment_name = PREFECT_DEPLOYMENTS[deployment_key]["name"]
-        st.caption(f"Nom Prefect : `{deployment_name}`")
-
-        prefect_params: dict[str, Any] = {}
-        if deployment_key in {"Pipeline complet", "Daily report"}:
-            prefect_bucket = st.text_input(
-                "Bucket GCS",
-                value=GCS_BUCKET_NAME,
-                key="prefect_bucket_name",
-            )
-            prefect_prefix = st.text_input(
-                "Préfixe GCS",
-                value="processed/",
-                key="prefect_prefix_name",
-            )
-            prefect_period = st.selectbox(
-                "Période",
-                ["Depuis le début du mois", "7 derniers jours", "Toutes les données"],
-                index=0,
-                key="prefect_period_name",
-            )
-            prefect_ref_date = st.date_input(
-                "Date de référence",
-                value=date.today(),
-                format="DD/MM/YYYY",
-                key="prefect_ref_date_name",
-            )
-            prefect_region = st.text_input(
-                "Région (optionnel)",
-                value="",
-                placeholder="Île-de-France",
-                key="prefect_region_name",
-            )
-            prefect_department = st.text_input(
-                "Département (optionnel)",
-                value="",
-                placeholder="75 – Paris",
-                key="prefect_department_name",
-            )
-            prefect_params = _prefect_run_params(
-                bucket_name=prefect_bucket,
-                prefix=prefect_prefix,
-                reference_date=prefect_ref_date,
-                period=prefect_period,
-                region=prefect_region,
-                department_label=prefect_department,
-            )
-        elif deployment_key == "KPI transmis global":
-            kpi_type = st.selectbox(
-                "Type de KPI",
-                ["both", "transmis", "transmis_lus"],
-                index=0,
-                help="Correspond au paramètre `kpi_type` du flow.",
-                key="prefect_kpi_type",
-            )
-            prefect_params = {"kpi_type": kpi_type}
-
-        auto_run_key = "prefect_auto_run_done"
-        auto_should_run = not st.session_state.get(auto_run_key, False)
-        if auto_should_run:
-            st.session_state[auto_run_key] = True
-            with st.spinner("Lancement automatique du déploiement Prefect…"):
-                try:
-                    prefect_result = _run_prefect_deployment(deployment_name, prefect_params)
-                    st.session_state["prefect_last_result"] = prefect_result
-                    st.session_state["prefect_last_result_at"] = datetime.now().isoformat(timespec="seconds")
-                    st.cache_data.clear()
-                    st.rerun()
-                except Exception as e:
-                    st.session_state["prefect_last_error"] = str(e)
-                    st.error(f"Erreur Prefect : {e}")
-
-        if st.button("🔁 Relancer le déploiement", width="stretch"):
-            with st.spinner("Création du flow run Prefect…"):
-                try:
-                    prefect_result = _run_prefect_deployment(deployment_name, prefect_params)
-                    st.session_state["prefect_last_result"] = prefect_result
-                    st.session_state["prefect_last_result_at"] = datetime.now().isoformat(timespec="seconds")
-                    st.session_state["prefect_auto_run_done"] = True
-                    st.cache_data.clear()
-                    st.rerun()
-                except Exception as e:
-                    st.session_state["prefect_last_error"] = str(e)
-                    st.error(f"Erreur Prefect : {e}")
-
-        st.divider()
-
-        latest_prefect_result = _load_latest_prefect_summary() or st.session_state.get("prefect_last_result")
-        if isinstance(latest_prefect_result, dict):
-            st.markdown(_prefect_result_markdown(latest_prefect_result), unsafe_allow_html=False)
-        elif st.session_state.get("prefect_last_error"):
-            st.error(st.session_state["prefect_last_error"])
-        else:
-            st.info("Aucun résultat Prefect enregistré pour le moment.")
+    # Affichage du résultat
+    last_res = st.session_state.get("prefect_last_result")
+    if last_res:
+        st.markdown(_prefect_result_markdown(last_res), unsafe_allow_html=True)
 
     st.divider()
 
